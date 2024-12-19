@@ -1,4 +1,8 @@
-use std::{env::args, process::ExitCode};
+use std::{
+    env, fs,
+    io::{self, stdin, stdout, Read, Write},
+    process::{self, ExitCode},
+};
 
 fn usage(program: &str) {
     eprintln!("usage:");
@@ -6,30 +10,50 @@ fn usage(program: &str) {
     eprintln!("{program} [path] - interpret file");
 }
 
+fn run(code: &str) {
+}
+
 fn run_repl() {
-    println!("Running REPL");
+    loop {
+        print!("> ");
+        stdout().flush().unwrap();
+
+        let mut line = String::new();
+        let size = stdin().read_line(&mut line).unwrap();
+        if size == 0 {
+            // Ctrl-D
+            break;
+        }
+
+        run(&line);
+    }
 }
 
 fn run_file(path: &str) {
-    println!("Interpreting \"{path}\"");
+    let code = fs::read_to_string(path).unwrap_or_else(|err| {
+        eprintln!("Unable to read file \"{path}\": {err}");
+        process::exit(1);
+    });
+
+    run(&code);
 }
 
 fn main() -> ExitCode {
-    let args: Vec<String> = args().collect();
+    let args: Vec<String> = env::args().collect();
     let program = args[0].split('/').last().unwrap();
 
     match args.len() {
         1 => {
             run_repl();
-            return ExitCode::SUCCESS;
+            ExitCode::SUCCESS
         }
         2 => {
             run_file(&args[1]);
-            return ExitCode::SUCCESS;
+            ExitCode::SUCCESS
         }
         _ => {
             usage(program);
-            return ExitCode::FAILURE;
+            ExitCode::FAILURE
         }
     }
 }
