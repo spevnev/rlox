@@ -70,12 +70,13 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "while"  => TokenKind::While
 };
 
+type Loc = (usize, usize);
+
 #[derive(Debug)]
 struct Token {
     kind: TokenKind,
     str: String,
-    line: usize,
-    column: usize,
+    loc: Loc,
 }
 
 struct Lexer {
@@ -99,24 +100,33 @@ impl Lexer {
         self.index >= self.source.len()
     }
 
+    fn loc(&self) -> Loc {
+        (self.line, self.index - self.line_index + 1)
+    }
+
     fn next_line(&mut self) {
         self.line_index = self.index;
         self.line += 1;
     }
 
     // Return current char without advancing
-    fn peek(&self) -> char {
-        assert!(!self.is_done());
-        return self.source[self.index];
+    fn peek(&self) -> Option<char> {
+        if self.is_done() {
+            return None;
+        }
+
+        Some(self.source[self.index])
     }
 
     // Return current char and advances
-    fn advance(&mut self) -> char {
-        assert!(!self.is_done());
+    fn advance(&mut self) -> Option<char> {
+        if self.is_done() {
+            return None;
+        }
 
         let ch = self.source[self.index];
         self.index += 1;
-        return ch;
+        Some(ch)
     }
 
     // Advances if the next char is `c`
@@ -137,17 +147,33 @@ impl Lexer {
     }
 }
 
-fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
+fn print_error(path: Option<&str>, loc: Loc, message: &str) {
+    if path.is_some() {
+        // Interpreting file
+        eprintln!(
+            "[ERROR] {} at {}:{}:{}.",
+            message,
+            path.unwrap(),
+            loc.0,
+            loc.1
+        );
+    } else {
+        // REPL
+        assert!(loc.0 == 1, "REPL should only have a single line");
+        eprintln!("[ERROR] {} at column {}.", message, loc.1);
+    }
+}
+
+fn get_tokens(path: Option<&str>, source: &str) -> Result<Vec<Token>, ()> {
     let mut tokens: Vec<Token> = Vec::new();
     let mut lexer = Lexer::new(source);
-    let mut has_error = false;
+    let mut success = true;
 
     while !lexer.is_done() {
         let start = lexer.index;
-        let line = lexer.line;
-        let column = start - lexer.line_index + 1;
+        let loc = lexer.loc();
 
-        let kind = match lexer.advance() {
+        let kind = match lexer.advance().unwrap() {
             ' ' | '\r' | '\t' => continue,
             '\n' => {
                 lexer.next_line();
@@ -204,10 +230,11 @@ fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
 
             '"' => {
                 let mut backslashes = 0;
-                loop {
-                    let ch = lexer.advance();
+                let mut is_terminated = false;
 
+                while let Some(ch) = lexer.advance() {
                     if ch == '"' && backslashes % 2 == 0 {
+                        is_terminated = true;
                         break;
                     }
 
@@ -218,16 +245,19 @@ fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                     backslashes = if ch == '\\' { backslashes + 1 } else { 0 }
                 }
 
+                if !is_terminated {
+                    print_error(path, loc, "Unterminated string");
+                    return Err(());
+                }
+
                 TokenKind::String
             }
             'a'..='z' | 'A'..='Z' => {
-                loop {
-                    match lexer.peek() {
-                        'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => {
-                            let _ = lexer.advance();
-                        }
-                        _ => break,
-                    }
+                while lexer
+                    .peek()
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
+                    lexer.advance();
                 }
 
                 KEYWORDS
@@ -236,13 +266,13 @@ fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                     .unwrap_or(TokenKind::Identifier)
             }
             '0'..='9' => {
-                while lexer.peek().is_ascii_digit() {
+                while lexer.peek().is_some_and(|c| c.is_ascii_digit()) {
                     lexer.advance();
                 }
 
                 // Fractional part
                 if lexer.consume('.') {
-                    while lexer.peek().is_ascii_digit() {
+                    while lexer.peek().is_some_and(|c| c.is_ascii_digit()) {
                         lexer.advance();
                     }
                 }
@@ -251,32 +281,28 @@ fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
             }
 
             c => {
-                eprintln!(
-                    "[ERROR] Unknown character '{}' at {}:{}!",
-                    c, lexer.line, column
-                );
-                has_error = true;
+                print_error(path, loc, &format!("Unknown character '{c}'"));
+                success = false;
                 continue;
             }
         };
 
         tokens.push(Token {
             kind,
-            str: String::new(), // TODO: take substring
-            line,
-            column,
+            str: source[start..lexer.index].to_string(),
+            loc,
         });
     }
 
-    if has_error {
-        Err(())
-    } else {
+    if success {
         Ok(tokens)
+    } else {
+        Err(())
     }
 }
 
-fn run(source: &str) -> Result<(), ()> {
-    let tokens = get_tokens(source)?;
+fn run(path: Option<&str>, source: &str) -> Result<(), ()> {
+    let tokens = get_tokens(path, source)?;
 
     for token in tokens {
         println!("{token:?}");
@@ -297,7 +323,7 @@ fn run_repl() {
             break;
         }
 
-        let _ = run(&line);
+        let _ = run(None, &line);
     }
 }
 
@@ -307,7 +333,7 @@ fn run_file(path: &str) {
         process::exit(1);
     });
 
-    run(&source).unwrap_or_else(|_| process::exit(1));
+    run(Some(path), &source).unwrap_or_else(|_| process::exit(1));
 }
 
 fn usage(program: &str) {
