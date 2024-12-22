@@ -1,16 +1,33 @@
-pub fn print_error(path: Option<&str>, loc: (usize, usize), message: &str) {
+pub type Loc = (usize, usize);
+
+pub struct ErrorMessage {
+    loc: Loc,
+    message: String,
+}
+
+impl ErrorMessage {
+    pub fn new(loc: Loc, message: String) -> ErrorMessage {
+        ErrorMessage { loc, message }
+    }
+}
+
+pub fn write_error(
+    f: &mut std::fmt::Formatter<'_>,
+    path: Option<&str>,
+    error: &ErrorMessage,
+) -> Result<(), std::fmt::Error> {
     if path.is_some() {
-        // Interpreting file
-        eprintln!(
+        write!(
+            f,
             "[ERROR] {} at {}:{}:{}.",
-            message,
+            error.message,
             path.unwrap(),
-            loc.0,
-            loc.1
-        );
+            error.loc.0,
+            error.loc.1
+        )
     } else {
-        // REPL
-        assert!(loc.0 == 1, "REPL should only have a single line");
-        eprintln!("[ERROR] {} at column {}.", message, loc.1);
+        assert!(error.loc.0 == 1, "REPL should only have a single line");
+
+        write!(f, "[ERROR] {} at column {}.", error.message, error.loc.1)
     }
 }

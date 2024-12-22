@@ -1,13 +1,17 @@
 use std::{
-    env, fs,
+    env,
+    fmt::Display,
+    fs,
     io::{stdin, stdout, Write},
     process::{self, ExitCode},
 };
 
+use lexer::LexerError;
+
 mod error;
 mod lexer;
 
-fn run(path: Option<&str>, source: &str) -> Result<(), ()> {
+fn run<'a>(path: Option<&'a str>, source: &str) -> Result<(), LexerError<'a>> {
     let tokens = lexer::get_tokens(path, source)?;
 
     for token in tokens {
@@ -29,7 +33,7 @@ fn run_repl() {
             break;
         }
 
-        let _ = run(None, &line);
+        let _ = run(None, &line).inspect_err(|err| eprintln!("{err}"));
     }
 }
 
@@ -39,7 +43,10 @@ fn run_file(path: &str) {
         process::exit(1);
     });
 
-    run(Some(path), &source).unwrap_or_else(|_| process::exit(1));
+    run(Some(path), &source).unwrap_or_else(|err| {
+        eprintln!("{err}");
+        process::exit(1);
+    });
 }
 
 fn usage(program: &str) {
