@@ -4,15 +4,14 @@ use std::{
     process::{self, ExitCode},
 };
 
-use lexer::LexerError;
 use parser::print_ast;
 
 mod error;
 mod lexer;
 mod parser;
 
-fn run<'a>(path: Option<&'a str>, source: &str) -> Result<(), LexerError<'a>> {
-    let tokens = lexer::get_tokens(path, source)?; // TODO: rename to lex?
+fn run(source: &str) -> Result<(), ()> {
+    let tokens = lexer::get_tokens(source)?;
     let ast = parser::parse(tokens).unwrap(); // TODO: propagate/handle error
 
     print_ast(&ast);
@@ -32,7 +31,7 @@ fn run_repl() {
             break;
         }
 
-        let _ = run(None, &line).inspect_err(|err| eprintln!("{err}"));
+        let _ = run(&line);
     }
 }
 
@@ -42,10 +41,7 @@ fn run_file(path: &str) {
         process::exit(1);
     });
 
-    run(Some(path), &source).unwrap_or_else(|err| {
-        eprintln!("{err}");
-        process::exit(1);
-    });
+    run(&source).unwrap_or_else(|_| process::exit(1));
 }
 
 fn usage(program: &str) {

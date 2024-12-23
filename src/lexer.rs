@@ -1,8 +1,6 @@
-use core::fmt;
+use crate::error::{print_error, Loc};
 
-use crate::error::{write_error, ErrorMessage, Loc};
-
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // One or two character tokens
     LeftParen,
@@ -143,41 +141,10 @@ impl Lexer {
     }
 }
 
-pub struct LexerError<'a> {
-    path: Option<&'a str>,
-    errors: Vec<ErrorMessage>,
-}
-
-impl<'a> LexerError<'a> {
-    fn new(path: Option<&'a str>) -> LexerError<'a> {
-        LexerError {
-            path,
-            errors: Vec::new(),
-        }
-    }
-
-    fn add(&mut self, loc: Loc, message: String) {
-        self.errors.push(ErrorMessage::new(loc, message));
-    }
-}
-
-impl<'a> fmt::Display for LexerError<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for i in 0..self.errors.len() {
-            if i > 0 {
-                write!(f, "\n")?;
-            }
-            write_error(f, self.path, &self.errors[i])?;
-        }
-
-        Ok(())
-    }
-}
-
-pub fn get_tokens<'a>(path: Option<&'a str>, source: &str) -> Result<Vec<Token>, LexerError<'a>> {
-    let mut error = LexerError::new(path);
+pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
     let mut tokens: Vec<Token> = Vec::new();
     let mut lexer = Lexer::new(source);
+    let mut has_error = false;
 
     while !lexer.is_done() {
         let start = lexer.index;
@@ -256,8 +223,8 @@ pub fn get_tokens<'a>(path: Option<&'a str>, source: &str) -> Result<Vec<Token>,
                 }
 
                 if !is_terminated {
-                    error.add(loc, "Unterminated string".to_string());
-                    return Err(error);
+                    print_error(loc, "Unterminated string".to_string());
+                    return Err(());
                 }
 
                 TokenKind::String
@@ -291,7 +258,8 @@ pub fn get_tokens<'a>(path: Option<&'a str>, source: &str) -> Result<Vec<Token>,
             }
 
             c => {
-                error.add(loc, format!("Unknown character '{c}'"));
+                print_error(loc, format!("Unknown character '{c}'"));
+                has_error = true;
                 continue;
             }
         };
@@ -303,9 +271,9 @@ pub fn get_tokens<'a>(path: Option<&'a str>, source: &str) -> Result<Vec<Token>,
         });
     }
 
-    if error.errors.len() == 0 {
-        Ok(tokens)
+    if has_error {
+        Err(())
     } else {
-        Err(error)
+        Ok(tokens)
     }
 }
