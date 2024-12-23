@@ -1,12 +1,9 @@
-use crate::lexer::{Token, TokenKind};
+use crate::lexer::{Token, TokenKind, TokenValue};
 
 pub enum Expr {
     Unary(Unary),
     Binary(Binary),
-    Number(f64),
-    String(String),
-    Bool(bool),
-    Null(()),
+    Literal(TokenValue),
 }
 
 pub struct Unary {
@@ -70,7 +67,7 @@ impl Parser {
             }
         }
 
-        return false;
+        false
     }
 
     fn consume(&mut self, kinds: &[TokenKind]) -> bool {
@@ -82,7 +79,7 @@ impl Parser {
             }
         }
 
-        return false;
+        false
     }
 
     fn parse_primary(&mut self) -> Result<Expr, String> {
@@ -93,11 +90,10 @@ impl Parser {
 
         let token = opt_token.unwrap();
         match token.kind {
-            TokenKind::Number => Ok(Expr::Number(token.str.parse::<f64>().unwrap())),
-            TokenKind::String => Ok(Expr::String(token.str)),
-            TokenKind::False => Ok(Expr::Bool(false)),
-            TokenKind::True => Ok(Expr::Bool(true)),
-            TokenKind::Null => Ok(Expr::Null(())),
+            TokenKind::Number | TokenKind::String => Ok(Expr::Literal(token.value)),
+            TokenKind::False => Ok(Expr::Literal(TokenValue::Bool(false))),
+            TokenKind::True => Ok(Expr::Literal(TokenValue::Bool(true))),
+            TokenKind::Null => Ok(Expr::Literal(TokenValue::Null(()))),
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
                 if self.consume(&[TokenKind::RightParen]) {
@@ -118,7 +114,7 @@ impl Parser {
             return Ok(Expr::Unary(Unary::new(op, expr)));
         }
 
-        return self.parse_primary();
+        self.parse_primary()
     }
 
     fn parse_mult(&mut self) -> Result<Expr, String> {
@@ -175,33 +171,36 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, String> {
-        return self.parse_equality();
+        self.parse_equality()
     }
 }
 
 pub fn parse(tokens: Vec<Token>) -> Result<Expr, String> {
-    let mut parser = Parser::new(tokens);
-    return parser.parse_expr();
+    Parser::new(tokens).parse_expr()
 }
 
 fn print_ast_rec(expr: &Expr) {
     match expr {
         Expr::Unary(unary) => {
-            print!("({} ", unary.op.str);
+            print!("({:?} ", unary.op.kind);
             print_ast_rec(&unary.expr);
             print!(")");
         }
         Expr::Binary(binary) => {
             print!("(");
             print_ast_rec(&binary.left);
-            print!(" {} ", binary.op.str);
+            print!(" {:?} ", binary.op.kind);
             print_ast_rec(&binary.right);
             print!(")");
         }
-        Expr::Number(number) => print!("{number}"),
-        Expr::String(string) => print!("{string}"),
-        Expr::Bool(bool) => print!("{bool}"),
-        Expr::Null(()) => print!("null"),
+        Expr::Literal(value) => match value {
+            TokenValue::Number(number) => print!("{number}"),
+            TokenValue::String(string) => print!("{string}"),
+            TokenValue::Identifier(identifier) => print!("{identifier}"),
+            TokenValue::Bool(bool) => print!("{bool}"),
+            TokenValue::Null(()) => print!("null"),
+            TokenValue::None(()) => panic!(),
+        },
     };
 }
 
