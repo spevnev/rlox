@@ -68,11 +68,11 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "while"  => TokenKind::While
 };
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Token {
-    kind: TokenKind,
-    str: String,
-    loc: Loc,
+    pub kind: TokenKind,
+    pub str: String,
+    pub loc: Loc,
 }
 
 struct Lexer {

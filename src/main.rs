@@ -1,22 +1,21 @@
 use std::{
-    env,
-    fmt::Display,
-    fs,
+    env, fs,
     io::{stdin, stdout, Write},
     process::{self, ExitCode},
 };
 
 use lexer::LexerError;
+use parser::print_ast;
 
 mod error;
 mod lexer;
+mod parser;
 
 fn run<'a>(path: Option<&'a str>, source: &str) -> Result<(), LexerError<'a>> {
-    let tokens = lexer::get_tokens(path, source)?;
+    let tokens = lexer::get_tokens(path, source)?; // TODO: rename to lex?
+    let ast = parser::parse(tokens).unwrap(); // TODO: propagate/handle error
 
-    for token in tokens {
-        println!("{token:?}");
-    }
+    print_ast(&ast);
 
     Ok(())
 }
