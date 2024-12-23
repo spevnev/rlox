@@ -12,7 +12,7 @@ mod parser;
 
 fn run(source: &str) -> Result<(), ()> {
     let tokens = lexer::get_tokens(source)?;
-    let ast = parser::parse(tokens).unwrap(); // TODO: propagate/handle error
+    let ast = parser::parse(tokens)?;
 
     print_ast(&ast);
 

@@ -1,4 +1,7 @@
-use crate::lexer::{Token, TokenKind, TokenValue};
+use crate::{
+    error::print_error,
+    lexer::{Token, TokenKind, TokenValue},
+};
 
 pub enum Expr {
     Unary(Unary),
@@ -82,10 +85,15 @@ impl Parser {
         false
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, String> {
+    fn parse_primary(&mut self) -> Result<Expr, ()> {
         let opt_token = self.advance();
         if opt_token.is_none() {
-            return Err("Expected expression.".to_string()); // TODO: better message, proper type
+            assert!(self.tokens.len() > 0); // TODO: how to handle?
+            print_error(
+                self.tokens[self.tokens.len() - 1].loc,
+                "Expected expression".to_string(),
+            );
+            return Err(());
         }
 
         let token = opt_token.unwrap();
@@ -99,15 +107,19 @@ impl Parser {
                 if self.consume(&[TokenKind::RightParen]) {
                     Ok(expr)
                 } else {
-                    // TODO: better message, proper type
-                    Err(format!("Unclosed '(' at {}:{}.", token.loc.0, token.loc.1,))
+                    print_error(token.loc, "Unclosed '('".to_string());
+                    Err(())
                 }
             }
-            _ => Err("Expected expression.".to_string()), // TODO: better message, proper type
+            _ => {
+                // TODO: change error message
+                print_error(token.loc, "Expected expression".to_string());
+                Err(())
+            }
         }
     }
 
-    fn parse_unary(&mut self) -> Result<Expr, String> {
+    fn parse_unary(&mut self) -> Result<Expr, ()> {
         if self.is_next(&[TokenKind::Bang, TokenKind::Minus]) {
             let op = self.advance().unwrap();
             let expr = self.parse_unary()?;
@@ -117,7 +129,7 @@ impl Parser {
         self.parse_primary()
     }
 
-    fn parse_mult(&mut self) -> Result<Expr, String> {
+    fn parse_mult(&mut self) -> Result<Expr, ()> {
         let mut expr = self.parse_unary()?;
 
         while self.is_next(&[TokenKind::Star, TokenKind::Slash]) {
@@ -129,7 +141,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_addition(&mut self) -> Result<Expr, String> {
+    fn parse_addition(&mut self) -> Result<Expr, ()> {
         let mut expr = self.parse_mult()?;
 
         while self.is_next(&[TokenKind::Plus, TokenKind::Minus]) {
@@ -141,7 +153,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_comparison(&mut self) -> Result<Expr, String> {
+    fn parse_comparison(&mut self) -> Result<Expr, ()> {
         let mut expr = self.parse_addition()?;
 
         while self.is_next(&[
@@ -158,7 +170,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_equality(&mut self) -> Result<Expr, String> {
+    fn parse_equality(&mut self) -> Result<Expr, ()> {
         let mut expr = self.parse_comparison()?;
 
         while self.is_next(&[TokenKind::EqualEqual, TokenKind::BangEqual]) {
@@ -170,12 +182,12 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_expr(&mut self) -> Result<Expr, String> {
+    fn parse_expr(&mut self) -> Result<Expr, ()> {
         self.parse_equality()
     }
 }
 
-pub fn parse(tokens: Vec<Token>) -> Result<Expr, String> {
+pub fn parse(tokens: Vec<Token>) -> Result<Expr, ()> {
     Parser::new(tokens).parse_expr()
 }
 
