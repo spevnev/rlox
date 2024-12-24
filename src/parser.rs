@@ -1,39 +1,63 @@
 use crate::{
-    error::print_error,
+    error::{print_error, Loc},
     lexer::{Token, TokenKind, TokenValue},
 };
 
 pub enum Expr {
+    Literal(Literal),
     Unary(Unary),
     Binary(Binary),
-    Literal(TokenValue),
+}
+impl Expr {
+    pub fn loc(&self) -> Loc {
+        match self {
+            Self::Literal(literal) => literal.loc,
+            Self::Unary(unary) => unary.loc,
+            Self::Binary(binary) => binary.loc,
+        }
+    }
+}
+
+pub struct Literal {
+    pub loc: Loc,
+    pub value: TokenValue,
+}
+
+impl Literal {
+    fn new(loc: Loc, value: TokenValue) -> Literal {
+        Literal { loc, value }
+    }
 }
 
 pub struct Unary {
-    op: Token,
-    expr: Box<Expr>,
+    pub loc: Loc,
+    pub op: TokenKind,
+    pub expr: Box<Expr>,
 }
 
 impl Unary {
     fn new(op: Token, expr: Expr) -> Unary {
         Unary {
-            op,
+            loc: op.loc,
+            op: op.kind,
             expr: Box::new(expr),
         }
     }
 }
 
 pub struct Binary {
-    left: Box<Expr>,
-    op: Token,
-    right: Box<Expr>,
+    pub loc: Loc,
+    pub left: Box<Expr>,
+    pub op: TokenKind,
+    pub right: Box<Expr>,
 }
 
 impl Binary {
     fn new(left: Expr, op: Token, right: Expr) -> Binary {
         Binary {
+            loc: op.loc,
             left: Box::new(left),
-            op,
+            op: op.kind,
             right: Box::new(right),
         }
     }
@@ -88,7 +112,7 @@ impl Parser {
     fn parse_primary(&mut self) -> Result<Expr, ()> {
         let opt_token = self.advance();
         if opt_token.is_none() {
-            assert!(self.tokens.len() > 0); // TODO: how to handle?
+            assert!(self.tokens.len() > 0);
             print_error(
                 self.tokens[self.tokens.len() - 1].loc,
                 "Expected expression".to_string(),
@@ -98,10 +122,18 @@ impl Parser {
 
         let token = opt_token.unwrap();
         match token.kind {
-            TokenKind::Number | TokenKind::String => Ok(Expr::Literal(token.value)),
-            TokenKind::False => Ok(Expr::Literal(TokenValue::Bool(false))),
-            TokenKind::True => Ok(Expr::Literal(TokenValue::Bool(true))),
-            TokenKind::Null => Ok(Expr::Literal(TokenValue::Null(()))),
+            TokenKind::Number | TokenKind::String => {
+                Ok(Expr::Literal(Literal::new(token.loc, token.value)))
+            }
+            TokenKind::False => Ok(Expr::Literal(Literal::new(
+                token.loc,
+                TokenValue::Bool(false),
+            ))),
+            TokenKind::True => Ok(Expr::Literal(Literal::new(
+                token.loc,
+                TokenValue::Bool(true),
+            ))),
+            TokenKind::Null => Ok(Expr::Literal(Literal::new(token.loc, TokenValue::Null(())))),
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
                 if self.consume(&[TokenKind::RightParen]) {
@@ -194,25 +226,18 @@ pub fn parse(tokens: Vec<Token>) -> Result<Expr, ()> {
 fn print_ast_rec(expr: &Expr) {
     match expr {
         Expr::Unary(unary) => {
-            print!("({:?} ", unary.op.kind);
+            print!("({:?} ", unary.op);
             print_ast_rec(&unary.expr);
             print!(")");
         }
         Expr::Binary(binary) => {
             print!("(");
             print_ast_rec(&binary.left);
-            print!(" {:?} ", binary.op.kind);
+            print!(" {:?} ", binary.op);
             print_ast_rec(&binary.right);
             print!(")");
         }
-        Expr::Literal(value) => match value {
-            TokenValue::Number(number) => print!("{number}"),
-            TokenValue::String(string) => print!("{string}"),
-            TokenValue::Identifier(identifier) => print!("{identifier}"),
-            TokenValue::Bool(bool) => print!("{bool}"),
-            TokenValue::Null(()) => print!("null"),
-            TokenValue::None(()) => panic!(),
-        },
+        Expr::Literal(literal) => print!("{}", literal.value.convert_to_string()),
     };
 }
 

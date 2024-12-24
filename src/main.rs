@@ -4,17 +4,30 @@ use std::{
     process::{self, ExitCode},
 };
 
-use parser::print_ast;
-
 mod error;
+mod interpreter;
 mod lexer;
 mod parser;
 
 fn run(source: &str) -> Result<(), ()> {
     let tokens = lexer::get_tokens(source)?;
-    let ast = parser::parse(tokens)?;
+    if tokens.is_empty() {
+        return Ok(());
+    }
 
-    print_ast(&ast);
+    println!("Tokens:");
+    for token in &tokens {
+        println!("{token:?} ");
+    }
+    println!();
+
+    let expr = parser::parse(tokens)?;
+
+    println!("AST:");
+    parser::print_ast(&expr);
+    println!();
+
+    interpreter::eval(expr)?;
 
     Ok(())
 }
