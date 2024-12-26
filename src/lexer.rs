@@ -237,7 +237,7 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                     return Err(());
                 }
 
-                value = Value::String(source[start..lexer.index].to_owned());
+                value = Value::String(source[(start + 1)..(lexer.index - 1)].to_owned());
                 TokenKind::String
             }
             'a'..='z' | 'A'..='Z' => {
