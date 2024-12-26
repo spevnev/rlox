@@ -8,6 +8,7 @@ pub enum Expr {
     Unary(Unary),
     Binary(Binary),
 }
+
 impl Expr {
     pub fn loc(&self) -> Loc {
         match self {
@@ -115,7 +116,7 @@ impl Parser {
             assert!(self.tokens.len() > 0);
             print_error(
                 self.tokens[self.tokens.len() - 1].loc,
-                "Expected expression".to_string(),
+                "Expected expression".to_owned(),
             );
             return Err(());
         }
@@ -139,13 +140,13 @@ impl Parser {
                 if self.consume(&[TokenKind::RightParen]) {
                     Ok(expr)
                 } else {
-                    print_error(token.loc, "Unclosed '('".to_string());
+                    print_error(token.loc, "Unclosed '('".to_owned());
                     Err(())
                 }
             }
             _ => {
                 // TODO: change error message
-                print_error(token.loc, "Expected expression".to_string());
+                print_error(token.loc, "Expected expression".to_owned());
                 Err(())
             }
         }

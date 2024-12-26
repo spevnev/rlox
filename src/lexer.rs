@@ -79,10 +79,10 @@ impl TokenValue {
     pub fn convert_to_string(&self) -> String {
         match self {
             TokenValue::Number(number) => number.to_string(),
-            TokenValue::String(string) => string.to_string(),
-            TokenValue::Identifier(identifier) => identifier.to_string(),
+            TokenValue::String(string) => string.to_owned(),
+            TokenValue::Identifier(identifier) => identifier.to_owned(),
             TokenValue::Bool(bool) => bool.to_string(),
-            TokenValue::Null(()) => "null".to_string(),
+            TokenValue::Null(()) => "null".to_owned(),
         }
     }
 }
@@ -245,11 +245,11 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                 }
 
                 if !is_terminated {
-                    print_error(loc, "Unterminated string".to_string());
+                    print_error(loc, "Unterminated string".to_owned());
                     return Err(());
                 }
 
-                value = TokenValue::String(source[start..lexer.index].to_string());
+                value = TokenValue::String(source[start..lexer.index].to_owned());
                 TokenKind::String
             }
             'a'..='z' | 'A'..='Z' => {
@@ -264,7 +264,7 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                 if let Some(keyword) = KEYWORDS.get(identifier).cloned() {
                     keyword
                 } else {
-                    value = TokenValue::Identifier(identifier.to_string());
+                    value = TokenValue::Identifier(identifier.to_owned());
                     TokenKind::Identifier
                 }
             }
