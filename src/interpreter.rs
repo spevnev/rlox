@@ -90,9 +90,15 @@ fn eval_binary(binary: Binary) -> Result<TokenValue, ()> {
         TokenKind::Star => Ok(TokenValue::Number(
             left.to_number(left_loc)? * right.to_number(right_loc)?,
         )),
-        TokenKind::Slash => Ok(TokenValue::Number(
-            left.to_number(left_loc)? / right.to_number(right_loc)?,
-        )),
+        TokenKind::Slash => {
+            let denom = right.to_number(right_loc)?;
+            if denom == 0.0 {
+                print_error(right_loc, "Division by 0.".to_owned());
+                Err(())
+            } else {
+                Ok(TokenValue::Number(left.to_number(left_loc)? / denom))
+            }
+        }
         _ => panic!("Unexpected binary operand: {:?}", binary.op),
     }
 }
