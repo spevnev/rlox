@@ -3,63 +3,54 @@ use crate::{
     lexer::{Token, TokenKind, Value},
 };
 
+pub struct Unary {
+    pub op: TokenKind,
+    pub expr: Box<LocExpr>,
+}
+
+pub struct Binary {
+    pub left: Box<LocExpr>,
+    pub op: TokenKind,
+    pub right: Box<LocExpr>,
+}
+
 pub enum Expr {
-    Literal(Literal),
+    Literal(Value),
     Unary(Unary),
     Binary(Binary),
 }
 
-impl Expr {
-    pub fn loc(&self) -> Loc {
-        match self {
-            Self::Literal(literal) => literal.loc,
-            Self::Unary(unary) => unary.loc,
-            Self::Binary(binary) => binary.loc,
+pub struct LocExpr {
+    pub loc: Loc,
+    pub expr: Expr,
+}
+
+impl LocExpr {
+    fn new_literal(loc: Loc, value: Value) -> LocExpr {
+        LocExpr {
+            loc,
+            expr: Expr::Literal(value),
         }
     }
-}
 
-pub struct Literal {
-    pub loc: Loc,
-    pub value: Value,
-}
-
-impl Literal {
-    fn new(loc: Loc, value: TokenValue) -> Literal {
-        Literal { loc, value }
-    }
-}
-
-pub struct Unary {
-    pub loc: Loc,
-    pub op: TokenKind,
-    pub expr: Box<Expr>,
-}
-
-impl Unary {
-    fn new(op: Token, expr: Expr) -> Unary {
-        Unary {
+    fn new_unary(op: Token, expr: LocExpr) -> LocExpr {
+        LocExpr {
             loc: op.loc,
-            op: op.kind,
-            expr: Box::new(expr),
+            expr: Expr::Unary(Unary {
+                op: op.kind,
+                expr: Box::new(expr),
+            }),
         }
     }
-}
 
-pub struct Binary {
-    pub loc: Loc,
-    pub left: Box<Expr>,
-    pub op: TokenKind,
-    pub right: Box<Expr>,
-}
-
-impl Binary {
-    fn new(left: Expr, op: Token, right: Expr) -> Binary {
-        Binary {
-            loc: op.loc,
-            left: Box::new(left),
-            op: op.kind,
-            right: Box::new(right),
+    fn new_binary(left: LocExpr, op: Token, right: LocExpr) -> LocExpr {
+        LocExpr {
+            loc: left.loc,
+            expr: Expr::Binary(Binary {
+                left: Box::new(left),
+                op: op.kind,
+                right: Box::new(right),
+            }),
         }
     }
 }
@@ -110,7 +101,7 @@ impl Parser {
         false
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, ()> {
+    fn parse_primary(&mut self) -> Result<LocExpr, ()> {
         let opt_token = self.advance();
         if opt_token.is_none() {
             assert!(self.tokens.len() > 0);
@@ -124,11 +115,11 @@ impl Parser {
         let token = opt_token.unwrap();
         match token.kind {
             TokenKind::Number | TokenKind::String => {
-                Ok(Expr::Literal(Literal::new(token.loc, token.value)))
+                Ok(LocExpr::new_literal(token.loc, token.value))
             }
-            TokenKind::False => Ok(Expr::Literal(Literal::new(token.loc, Value::Bool(false)))),
-            TokenKind::True => Ok(Expr::Literal(Literal::new(token.loc, Value::Bool(true)))),
-            TokenKind::Null => Ok(Expr::Literal(Literal::new(token.loc, Value::Null(())))),
+            TokenKind::False => Ok(LocExpr::new_literal(token.loc, Value::Bool(false))),
+            TokenKind::True => Ok(LocExpr::new_literal(token.loc, Value::Bool(true))),
+            TokenKind::Null => Ok(LocExpr::new_literal(token.loc, Value::Null(()))),
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
                 if self.consume(&[TokenKind::RightParen]) {
@@ -146,41 +137,41 @@ impl Parser {
         }
     }
 
-    fn parse_unary(&mut self) -> Result<Expr, ()> {
+    fn parse_unary(&mut self) -> Result<LocExpr, ()> {
         if self.is_next(&[TokenKind::Bang, TokenKind::Minus]) {
             let op = self.advance().unwrap();
             let expr = self.parse_unary()?;
-            return Ok(Expr::Unary(Unary::new(op, expr)));
+            return Ok(LocExpr::new_unary(op, expr));
         }
 
         self.parse_primary()
     }
 
-    fn parse_mult(&mut self) -> Result<Expr, ()> {
+    fn parse_mult(&mut self) -> Result<LocExpr, ()> {
         let mut expr = self.parse_unary()?;
 
         while self.is_next(&[TokenKind::Star, TokenKind::Slash]) {
             let op = self.advance().unwrap();
             let right = self.parse_unary()?;
-            expr = Expr::Binary(Binary::new(expr, op, right));
+            expr = LocExpr::new_binary(expr, op, right);
         }
 
         Ok(expr)
     }
 
-    fn parse_addition(&mut self) -> Result<Expr, ()> {
+    fn parse_addition(&mut self) -> Result<LocExpr, ()> {
         let mut expr = self.parse_mult()?;
 
         while self.is_next(&[TokenKind::Plus, TokenKind::Minus]) {
             let op = self.advance().unwrap();
             let right = self.parse_mult()?;
-            expr = Expr::Binary(Binary::new(expr, op, right));
+            expr = LocExpr::new_binary(expr, op, right);
         }
 
         Ok(expr)
     }
 
-    fn parse_comparison(&mut self) -> Result<Expr, ()> {
+    fn parse_comparison(&mut self) -> Result<LocExpr, ()> {
         let mut expr = self.parse_addition()?;
 
         while self.is_next(&[
@@ -191,29 +182,29 @@ impl Parser {
         ]) {
             let op = self.advance().unwrap();
             let right = self.parse_addition()?;
-            expr = Expr::Binary(Binary::new(expr, op, right));
+            expr = LocExpr::new_binary(expr, op, right);
         }
 
         Ok(expr)
     }
 
-    fn parse_equality(&mut self) -> Result<Expr, ()> {
+    fn parse_equality(&mut self) -> Result<LocExpr, ()> {
         let mut expr = self.parse_comparison()?;
 
         while self.is_next(&[TokenKind::EqualEqual, TokenKind::BangEqual]) {
             let op = self.advance().unwrap();
             let right = self.parse_comparison()?;
-            expr = Expr::Binary(Binary::new(expr, op, right));
+            expr = LocExpr::new_binary(expr, op, right);
         }
 
         Ok(expr)
     }
 
-    fn parse_expr(&mut self) -> Result<Expr, ()> {
+    fn parse_expr(&mut self) -> Result<LocExpr, ()> {
         self.parse_equality()
     }
 }
 
-pub fn parse(tokens: Vec<Token>) -> Result<Expr, ()> {
+pub fn parse(tokens: Vec<Token>) -> Result<LocExpr, ()> {
     Parser::new(tokens).parse_expr()
 }

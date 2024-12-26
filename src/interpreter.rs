@@ -1,20 +1,11 @@
 use crate::{
     error::{print_error, Loc},
-    parser::{Binary, Expr, Unary},
     lexer::{TokenKind, Value},
+    parser::{Binary, Expr, LocExpr, Unary},
 };
 
 impl Value {
-    pub fn convert_to_string(&self) -> String {
-        match self {
-            Value::Number(number) => number.to_string(),
-            Value::String(string) => string.to_owned(),
-            Value::Identifier(identifier) => identifier.to_owned(),
-            Value::Bool(bool) => bool.to_string(),
-            Value::Null(()) => "null".to_owned(),
-        }
-    }
-    fn expected_error(&self, expected_type: &str, loc: Loc) {
+    fn expected_error<T>(&self, expected_type: &str, loc: Loc) -> Result<T, ()> {
         print_error(
             loc,
             format!(
@@ -22,22 +13,13 @@ impl Value {
                 self.convert_to_string()
             ),
         );
+        Err(())
     }
 
     fn is_string(&self) -> bool {
         match self {
             Value::String(_) => true,
             _ => false,
-        }
-    }
-
-    fn to_number(&self, loc: Loc) -> Result<f64, ()> {
-        match self {
-            Value::Number(num) => Ok(num.clone()),
-            _ => {
-                self.expected_error("number", loc);
-                Err(())
-            }
         }
     }
 
@@ -48,10 +30,27 @@ impl Value {
             _ => true,
         }
     }
+
+    fn to_number(&self, loc: Loc) -> Result<f64, ()> {
+        match self {
+            Value::Number(num) => Ok(num.clone()),
+            _ => self.expected_error("number", loc),
+        }
+    }
+
+    pub fn convert_to_string(&self) -> String {
+        match self {
+            Value::Number(number) => number.to_string(),
+            Value::String(string) => string.to_owned(),
+            Value::Identifier(identifier) => identifier.to_owned(),
+            Value::Bool(bool) => bool.to_string(),
+            Value::Null(()) => "null".to_owned(),
+        }
+    }
 }
 
 fn eval_unary(unary: Unary) -> Result<Value, ()> {
-    let loc = unary.expr.loc();
+    let loc = unary.expr.loc;
     let value = eval(*unary.expr)?;
 
     match unary.op {
@@ -62,9 +61,9 @@ fn eval_unary(unary: Unary) -> Result<Value, ()> {
 }
 
 fn eval_binary(binary: Binary) -> Result<Value, ()> {
-    let left_loc = binary.left.loc();
+    let left_loc = binary.left.loc;
     let left = eval(*binary.left)?;
-    let right_loc = binary.right.loc();
+    let right_loc = binary.right.loc;
     let right = eval(*binary.right)?;
 
     match binary.op {
@@ -112,8 +111,8 @@ fn eval_binary(binary: Binary) -> Result<Value, ()> {
     }
 }
 
-pub fn eval(expr: Expr) -> Result<Value, ()> {
-    match expr {
+pub fn eval(expr: LocExpr) -> Result<Value, ()> {
+    match expr.expr {
         Expr::Literal(value) => Ok(value),
         Expr::Unary(unary) => eval_unary(unary),
         Expr::Binary(binary) => eval_binary(binary),
