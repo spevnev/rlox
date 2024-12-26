@@ -1,21 +1,10 @@
 use crate::{
-    error::{print_error, Loc},
+    error::{expected_error, print_error, Loc},
     lexer::{TokenKind, Value},
     parser::{Binary, Expr, LocExpr, Unary},
 };
 
 impl Value {
-    fn expected_error<T>(&self, expected_type: &str, loc: Loc) -> Result<T, ()> {
-        print_error(
-            loc,
-            format!(
-                "Expected {expected_type} but found '{}'",
-                self.convert_to_string()
-            ),
-        );
-        Err(())
-    }
-
     fn is_string(&self) -> bool {
         match self {
             Value::String(_) => true,
@@ -34,14 +23,20 @@ impl Value {
     fn to_number(&self, loc: Loc) -> Result<f64, ()> {
         match self {
             Value::Number(num) => Ok(num.clone()),
-            _ => self.expected_error("number", loc),
+            _ => expected_error("number", self, loc),
         }
     }
 
-    pub fn convert_to_string(&self) -> String {
+    pub fn convert_to_string(&self, quote_string: bool) -> String {
         match self {
             Value::Number(number) => number.to_string(),
-            Value::String(string) => string.to_owned(),
+            Value::String(string) => {
+                if quote_string {
+                    format!("\"{string}\"")
+                } else {
+                    string.to_owned()
+                }
+            }
             Value::Identifier(identifier) => identifier.to_owned(),
             Value::Bool(bool) => bool.to_string(),
             Value::Null(()) => "null".to_owned(),
@@ -84,7 +79,7 @@ fn eval_binary(binary: Binary) -> Result<Value, ()> {
         TokenKind::Plus => {
             if left.is_string() || right.is_string() {
                 Ok(Value::String(
-                    left.convert_to_string() + &right.convert_to_string(),
+                    left.convert_to_string(false) + &right.convert_to_string(false),
                 ))
             } else {
                 Ok(Value::Number(

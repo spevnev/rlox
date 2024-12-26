@@ -14,7 +14,7 @@ fn print_ast_rec(expr: &LocExpr) {
             print_ast_rec(&binary.right);
             print!(")");
         }
-        Expr::Literal(value) => print!("{}", value.convert_to_string()),
+        Expr::Literal(value) => print!("{}", value.convert_to_string(true)),
     };
 }
 
