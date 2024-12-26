@@ -8,6 +8,7 @@ mod error;
 mod interpreter;
 mod lexer;
 mod parser;
+mod print;
 
 fn run(source: &str) -> Result<(), ()> {
     let tokens = lexer::get_tokens(source)?;
@@ -24,7 +25,7 @@ fn run(source: &str) -> Result<(), ()> {
     let expr = parser::parse(tokens)?;
 
     println!("AST:");
-    parser::print_ast(&expr);
+    print::print_ast(&expr);
     println!();
 
     interpreter::eval(expr)?;
