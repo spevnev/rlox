@@ -107,7 +107,7 @@ impl Parser {
             assert!(self.tokens.len() > 0);
             print_error(
                 self.tokens[self.tokens.len() - 1].loc,
-                "Expected expression".to_owned(),
+                "Expected expression but reached the end.".to_owned(),
             );
             return Err(());
         }
@@ -129,11 +129,7 @@ impl Parser {
                     Err(())
                 }
             }
-            _ => {
-                // TODO: change error message
-                print_error(token.loc, "Expected expression".to_owned());
-                Err(())
-            }
+            _ => expected_error("expression", &token.value, token.loc),
         }
     }
 
