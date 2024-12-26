@@ -6,7 +6,7 @@ pub fn print_error(loc: Loc, message: String) {
     eprintln!("[ERROR] {} at {}:{}.", message, loc.0, loc.1)
 }
 
-pub fn expected_error<T>(expected: &str, value: &Value, loc: Loc) -> Result<T, ()> {
+pub fn error_expected<T>(expected: &str, value: &Value, loc: Loc) -> Result<T, ()> {
     print_error(
         loc,
         format!(

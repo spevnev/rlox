@@ -1,5 +1,5 @@
 use crate::{
-    error::{expected_error, print_error, Loc},
+    error::{error_expected, print_error, Loc},
     lexer::{Token, TokenKind, Value},
 };
 
@@ -89,18 +89,6 @@ impl Parser {
         false
     }
 
-    fn consume(&mut self, kinds: &[TokenKind]) -> bool {
-        if let Some(token) = self.advance() {
-            for kind in kinds {
-                if token.kind == *kind {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
     fn parse_primary(&mut self) -> Result<LocExpr, ()> {
         let opt_token = self.advance();
         if opt_token.is_none() {
@@ -122,14 +110,15 @@ impl Parser {
             TokenKind::Null => Ok(LocExpr::new_literal(token.loc, Value::Null(()))),
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
-                if self.consume(&[TokenKind::RightParen]) {
+                if self.is_next(&[TokenKind::RightParen]) {
+                    self.advance();
                     Ok(expr)
                 } else {
                     print_error(token.loc, "Unclosed '('".to_owned());
                     Err(())
                 }
             }
-            _ => expected_error("expression", &token.value, token.loc),
+            _ => error_expected("expression", &token.value, token.loc),
         }
     }
 

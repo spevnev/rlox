@@ -1,5 +1,5 @@
 use crate::{
-    error::{expected_error, print_error, Loc},
+    error::{error_expected, print_error, Loc},
     lexer::{TokenKind, Value},
     parser::{Binary, Expr, LocExpr, Unary},
 };
@@ -23,7 +23,7 @@ impl Value {
     fn to_number(&self, loc: Loc) -> Result<f64, ()> {
         match self {
             Value::Number(num) => Ok(num.clone()),
-            _ => expected_error("number", self, loc),
+            _ => error_expected("number", self, loc),
         }
     }
 
