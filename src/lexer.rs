@@ -67,7 +67,7 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
 };
 
 #[derive(PartialEq, Debug, Clone)]
-pub enum TokenValue {
+pub enum Value {
     Number(f64),
     String(String),
     Identifier(String),
@@ -75,22 +75,10 @@ pub enum TokenValue {
     Null(()),
 }
 
-impl TokenValue {
-    pub fn convert_to_string(&self) -> String {
-        match self {
-            TokenValue::Number(number) => number.to_string(),
-            TokenValue::String(string) => string.to_owned(),
-            TokenValue::Identifier(identifier) => identifier.to_owned(),
-            TokenValue::Bool(bool) => bool.to_string(),
-            TokenValue::Null(()) => "null".to_owned(),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
-    pub value: TokenValue,
+    pub value: Value,
     pub loc: Loc,
 }
 
@@ -171,7 +159,7 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
         let start = lexer.index;
         let loc = lexer.loc();
 
-        let mut value = TokenValue::Null(());
+        let mut value = Value::Null(());
         let kind = match lexer.advance().unwrap() {
             ' ' | '\r' | '\t' => continue,
             '\n' => {
@@ -249,7 +237,7 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                     return Err(());
                 }
 
-                value = TokenValue::String(source[start..lexer.index].to_owned());
+                value = Value::String(source[start..lexer.index].to_owned());
                 TokenKind::String
             }
             'a'..='z' | 'A'..='Z' => {
@@ -264,7 +252,7 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                 if let Some(keyword) = KEYWORDS.get(identifier).cloned() {
                     keyword
                 } else {
-                    value = TokenValue::Identifier(identifier.to_owned());
+                    value = Value::Identifier(identifier.to_owned());
                     TokenKind::Identifier
                 }
             }
@@ -281,7 +269,7 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                 }
 
                 if let Ok(number) = source[start..lexer.index].parse::<f64>() {
-                    value = TokenValue::Number(number);
+                    value = Value::Number(number);
                     TokenKind::Number
                 } else {
                     print_error(

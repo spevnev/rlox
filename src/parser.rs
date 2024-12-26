@@ -1,6 +1,6 @@
 use crate::{
     error::{print_error, Loc},
-    lexer::{Token, TokenKind, TokenValue},
+    lexer::{Token, TokenKind, Value},
 };
 
 pub enum Expr {
@@ -21,7 +21,7 @@ impl Expr {
 
 pub struct Literal {
     pub loc: Loc,
-    pub value: TokenValue,
+    pub value: Value,
 }
 
 impl Literal {
@@ -126,15 +126,9 @@ impl Parser {
             TokenKind::Number | TokenKind::String => {
                 Ok(Expr::Literal(Literal::new(token.loc, token.value)))
             }
-            TokenKind::False => Ok(Expr::Literal(Literal::new(
-                token.loc,
-                TokenValue::Bool(false),
-            ))),
-            TokenKind::True => Ok(Expr::Literal(Literal::new(
-                token.loc,
-                TokenValue::Bool(true),
-            ))),
-            TokenKind::Null => Ok(Expr::Literal(Literal::new(token.loc, TokenValue::Null(())))),
+            TokenKind::False => Ok(Expr::Literal(Literal::new(token.loc, Value::Bool(false)))),
+            TokenKind::True => Ok(Expr::Literal(Literal::new(token.loc, Value::Bool(true)))),
+            TokenKind::Null => Ok(Expr::Literal(Literal::new(token.loc, Value::Null(())))),
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
                 if self.consume(&[TokenKind::RightParen]) {
