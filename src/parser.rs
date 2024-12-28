@@ -55,6 +55,17 @@ impl LocExpr {
     }
 }
 
+#[derive(Debug)]
+pub enum StmtKind {
+    Expr,
+    Print,
+}
+
+pub struct Stmt {
+    pub expr: LocExpr,
+    pub kind: StmtKind,
+}
+
 struct Parser {
     tokens: Vec<Token>,
     index: usize,
@@ -63,6 +74,10 @@ struct Parser {
 impl Parser {
     fn new(tokens: Vec<Token>) -> Parser {
         Parser { tokens, index: 0 }
+    }
+
+    fn is_done(&self) -> bool {
+        self.index >= self.tokens.len()
     }
 
     fn advance(&mut self) -> Option<Token> {
@@ -188,8 +203,49 @@ impl Parser {
     fn parse_expr(&mut self) -> Result<LocExpr, ()> {
         self.parse_equality()
     }
+
+    fn parse_stmt(&mut self) -> Result<Stmt, ()> {
+        let mut kind = StmtKind::Expr;
+        if self.is_next(&[TokenKind::Print]) {
+            self.advance();
+            kind = StmtKind::Print;
+        }
+
+        let expr = self.parse_expr()?;
+        let opt_token = self.advance();
+
+        if opt_token.is_none() {
+            assert!(self.tokens.len() > 0);
+            print_error(
+                self.tokens[self.tokens.len() - 1].loc,
+                "Expected semicolon after the statement".to_owned(),
+            );
+            return Err(());
+        }
+
+        let token = opt_token.unwrap();
+        if token.kind == TokenKind::Semicolon {
+            Ok(Stmt { expr, kind })
+        } else {
+            error_expected("semicolon after the statement", &token.value, token.loc)
+        }
+    }
+
+    fn parse(&mut self) -> Result<Vec<Stmt>, ()> {
+        let mut stmts: Vec<Stmt> = Vec::new();
+
+        while !self.is_done() {
+            stmts.push(self.parse_stmt()?);
+        }
+
+        assert!(
+            self.index == self.tokens.len(),
+            "Parser must reach the end of tokens"
+        );
+        Ok(stmts)
+    }
 }
 
-pub fn parse(tokens: Vec<Token>) -> Result<LocExpr, ()> {
-    Parser::new(tokens).parse_expr()
+pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, ()> {
+    Parser::new(tokens).parse()
 }

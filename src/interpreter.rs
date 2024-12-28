@@ -1,7 +1,7 @@
 use crate::{
     error::{error_expected, print_error, Loc},
     lexer::{TokenKind, Value},
-    parser::{Binary, Expr, LocExpr, Unary},
+    parser::{Binary, Expr, LocExpr, Stmt, StmtKind, Unary},
 };
 
 impl Value {
@@ -46,7 +46,7 @@ impl Value {
 
 fn eval_unary(unary: Unary) -> Result<Value, ()> {
     let loc = unary.expr.loc;
-    let value = eval(*unary.expr)?;
+    let value = eval_expr(*unary.expr)?;
 
     match unary.op {
         TokenKind::Minus => Ok(Value::Number(-value.to_number(loc)?)),
@@ -57,9 +57,9 @@ fn eval_unary(unary: Unary) -> Result<Value, ()> {
 
 fn eval_binary(binary: Binary) -> Result<Value, ()> {
     let left_loc = binary.left.loc;
-    let left = eval(*binary.left)?;
+    let left = eval_expr(*binary.left)?;
     let right_loc = binary.right.loc;
-    let right = eval(*binary.right)?;
+    let right = eval_expr(*binary.right)?;
 
     match binary.op {
         TokenKind::EqualEqual => Ok(Value::Bool(left == right)),
@@ -106,10 +106,29 @@ fn eval_binary(binary: Binary) -> Result<Value, ()> {
     }
 }
 
-pub fn eval(expr: LocExpr) -> Result<Value, ()> {
+fn eval_expr(expr: LocExpr) -> Result<Value, ()> {
     match expr.expr {
         Expr::Literal(value) => Ok(value),
         Expr::Unary(unary) => eval_unary(unary),
         Expr::Binary(binary) => eval_binary(binary),
     }
+}
+
+fn eval_stmt(stmt: Stmt) -> Result<(), ()> {
+    let result = eval_expr(stmt.expr)?;
+
+    match stmt.kind {
+        StmtKind::Expr => {}
+        StmtKind::Print => println!("{}", result.convert_to_string(false)),
+    };
+
+    Ok(())
+}
+
+pub fn eval(stmts: Vec<Stmt>) -> Result<(), ()> {
+    for stmt in stmts {
+        eval_stmt(stmt)?;
+    }
+
+    Ok(())
 }

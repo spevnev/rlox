@@ -22,13 +22,13 @@ fn run(source: &str) -> Result<(), ()> {
     }
     println!();
 
-    let expr = parser::parse(tokens)?;
+    let stmts = parser::parse(tokens)?;
 
     println!("AST:");
-    print::print_ast(&expr);
+    print::print_ast(&stmts);
     println!();
 
-    interpreter::eval(expr)?;
+    interpreter::eval(stmts)?;
 
     Ok(())
 }

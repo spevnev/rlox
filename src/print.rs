@@ -1,24 +1,27 @@
-use crate::parser::{Expr, LocExpr};
+use crate::parser::{Expr, LocExpr, Stmt};
 
-fn print_ast_rec(expr: &LocExpr) {
-    match &expr.expr {
+fn print_ast_rec(expr: &Expr) {
+    match expr {
         Expr::Unary(unary) => {
             print!("({:?} ", unary.op);
-            print_ast_rec(&unary.expr);
+            print_ast_rec(&unary.expr.expr);
             print!(")");
         }
         Expr::Binary(binary) => {
             print!("(");
-            print_ast_rec(&binary.left);
+            print_ast_rec(&binary.left.expr);
             print!(" {:?} ", binary.op);
-            print_ast_rec(&binary.right);
+            print_ast_rec(&binary.right.expr);
             print!(")");
         }
         Expr::Literal(value) => print!("{}", value.convert_to_string(true)),
     };
 }
 
-pub fn print_ast(expr: &LocExpr) {
-    print_ast_rec(expr);
-    print!("\n");
+pub fn print_ast(stmts: &Vec<Stmt>) {
+    for stmt in stmts {
+        print!("{:?}", stmt.kind);
+        print_ast_rec(&stmt.expr.expr);
+        print!("\n");
+    }
 }
