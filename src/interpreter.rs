@@ -69,7 +69,7 @@ impl Interpreter {
             self.vars.insert(id, value);
             Ok(())
         } else {
-            print_error(loc, format!("Redefinition of variable '{}'", id));
+            print_error(loc, &format!("Redefinition of variable '{}'", id));
             Err(())
         }
     }
@@ -82,7 +82,7 @@ impl Interpreter {
         if let Some(value) = self.vars.get(id) {
             Ok(value)
         } else {
-            print_error(loc, format!("Undefined variable '{}'", id));
+            print_error(loc, &format!("Undefined variable '{}'", id));
             Err(())
         }
     }
@@ -139,7 +139,7 @@ impl Interpreter {
             TokenKind::Slash => {
                 let denom = right.to_number(right_loc)?;
                 if denom == 0.0 {
-                    print_error(right_loc, "Division by 0".to_owned());
+                    print_error(right_loc, "Division by 0");
                     Err(())
                 } else {
                     Ok(Value::Number(left.to_number(left_loc)? / denom))

@@ -125,7 +125,7 @@ impl Parser {
             assert!(self.tokens.len() > 0);
             print_error(
                 self.tokens[self.tokens.len() - 1].loc,
-                format!("Expected {:?} but reached the end", kind),
+                &format!("Expected {:?} but reached the end", kind),
             );
             return Err(());
         }
@@ -167,7 +167,7 @@ impl Parser {
             assert!(self.tokens.len() > 0);
             print_error(
                 self.tokens[self.tokens.len() - 1].loc,
-                "Expected expression but reached the end".to_owned(),
+                "Expected expression but reached the end",
             );
             return Err(());
         }
@@ -189,7 +189,7 @@ impl Parser {
                 if self.consume(&[TokenKind::RightParen]) {
                     Ok(expr)
                 } else {
-                    print_error(token.loc, "Unclosed '('".to_owned());
+                    print_error(token.loc, "Unclosed '('");
                     Err(())
                 }
             }
@@ -273,7 +273,7 @@ impl Parser {
             assert!(self.tokens.len() > 0);
             print_error(
                 self.tokens[self.tokens.len() - 1].loc,
-                "Expected semicolon after the statement but reached the end".to_owned(),
+                "Expected semicolon after the statement but reached the end",
             );
             return Err(());
         }
@@ -282,10 +282,7 @@ impl Parser {
         if token.kind == TokenKind::Semicolon {
             Ok(Stmt::Expr(expr))
         } else {
-            print_error(
-                token.loc,
-                "Expected semicolon after the statement".to_owned(),
-            );
+            print_error(token.loc, "Expected semicolon after the statement");
             Err(())
         }
     }
@@ -297,7 +294,7 @@ impl Parser {
             assert!(self.tokens.len() > 0);
             print_error(
                 self.tokens[self.tokens.len() - 1].loc,
-                "Expected semicolon after the print statement but reached the end".to_owned(),
+                "Expected semicolon after the print statement but reached the end",
             );
             return Err(());
         }
@@ -306,10 +303,7 @@ impl Parser {
         if token.kind == TokenKind::Semicolon {
             Ok(Stmt::Print(expr))
         } else {
-            print_error(
-                token.loc,
-                "Expected semicolon after the print statement".to_owned(),
-            );
+            print_error(token.loc, "Expected semicolon after the print statement");
             Err(())
         }
     }
@@ -336,7 +330,7 @@ impl Parser {
         } else {
             print_error(
                 token.loc,
-                "Expected semicolon after the variable declaration".to_owned(),
+                "Expected semicolon after the variable declaration",
             );
             Err(())
         }

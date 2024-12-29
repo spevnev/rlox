@@ -233,7 +233,7 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                 }
 
                 if !is_terminated {
-                    print_error(loc, "Unterminated string".to_owned());
+                    print_error(loc, "Unterminated string");
                     return Err(());
                 }
 
@@ -274,7 +274,7 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                 } else {
                     print_error(
                         loc,
-                        format!("Unable to parse number '{}'", &source[start..lexer.index]),
+                        &format!("Unable to parse number '{}'", &source[start..lexer.index]),
                     );
                     has_error = true;
                     continue;
@@ -282,7 +282,7 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
             }
 
             c => {
-                print_error(loc, format!("Unknown character '{c}'"));
+                print_error(loc, &format!("Unknown character '{c}'"));
                 has_error = true;
                 continue;
             }
