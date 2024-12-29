@@ -3,7 +3,6 @@ use crate::parser::{Expr, LocExpr, Stmt};
 fn print_expr(expr: &LocExpr) {
     match &expr.expr {
         Expr::Literal(value) => print!("{}", value.convert_to_string(true)),
-        Expr::Var(id) => print!("{}", id),
         Expr::Unary(unary) => {
             print!("({:?} ", unary.op);
             print_expr(&unary.expr);
@@ -16,6 +15,12 @@ fn print_expr(expr: &LocExpr) {
             print_expr(&binary.right);
             print!(")");
         }
+        Expr::Var(id) => print!("{}", id),
+        Expr::Assign(assign) => {
+            print!("({} = ", assign.var);
+            print_expr(&assign.expr);
+            print!(")")
+        }
     };
 }
 
@@ -26,9 +31,9 @@ fn print_stmt(stmt: &Stmt) {
             print!("Print ");
             print_expr(expr);
         }
-        Stmt::Var(_, id, init_expr) => {
+        Stmt::VarDecl(_, id, expr) => {
             print!("Var {} = ", id);
-            print_expr(init_expr);
+            print_expr(expr);
         }
     }
 }

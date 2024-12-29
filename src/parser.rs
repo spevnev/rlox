@@ -14,11 +14,17 @@ pub struct Binary {
     pub right: Box<LocExpr>,
 }
 
+pub struct Assign {
+    pub var: String,
+    pub expr: Box<LocExpr>,
+}
+
 pub enum Expr {
     Literal(Value),
-    Var(String),
     Unary(Unary),
     Binary(Binary),
+    Var(String),
+    Assign(Assign),
 }
 
 pub struct LocExpr {
@@ -31,13 +37,6 @@ impl LocExpr {
         LocExpr {
             loc,
             expr: Expr::Literal(value),
-        }
-    }
-
-    fn new_var(loc: Loc, id: String) -> LocExpr {
-        LocExpr {
-            loc,
-            expr: Expr::Var(id),
         }
     }
 
@@ -61,12 +60,29 @@ impl LocExpr {
             }),
         }
     }
+
+    fn new_var(loc: Loc, id: String) -> LocExpr {
+        LocExpr {
+            loc,
+            expr: Expr::Var(id),
+        }
+    }
+
+    fn new_assign(loc: Loc, var: String, expr: LocExpr) -> LocExpr {
+        LocExpr {
+            loc,
+            expr: Expr::Assign(Assign {
+                var,
+                expr: Box::new(expr),
+            }),
+        }
+    }
 }
 
 pub enum Stmt {
     Expr(LocExpr),
     Print(LocExpr),
-    Var(Loc, String, LocExpr),
+    VarDecl(Loc, String, LocExpr),
 }
 
 struct Parser {
@@ -262,8 +278,26 @@ impl Parser {
         Ok(expr)
     }
 
+    fn parse_assignment(&mut self) -> Result<LocExpr, ()> {
+        let l_expr = self.parse_equality()?;
+
+        if self.consume(&[TokenKind::Equal]) {
+            let r_expr = self.parse_expr()?;
+
+            match l_expr.expr {
+                Expr::Var(id) => Ok(LocExpr::new_assign(l_expr.loc, id, r_expr)),
+                _ => {
+                    print_error(l_expr.loc, "Invalid l-value");
+                    Err(())
+                }
+            }
+        } else {
+            Ok(l_expr)
+        }
+    }
+
     fn parse_expr(&mut self) -> Result<LocExpr, ()> {
-        self.parse_equality()
+        self.parse_assignment()
     }
 
     fn parse_expr_stmt(&mut self) -> Result<Stmt, ()> {
@@ -326,7 +360,7 @@ impl Parser {
 
         let token = self.advance().unwrap();
         if token.kind == TokenKind::Semicolon {
-            Ok(Stmt::Var(id.loc, id.value.to_identifier(id.loc)?, init))
+            Ok(Stmt::VarDecl(id.loc, id.value.to_identifier(id.loc)?, init))
         } else {
             print_error(
                 token.loc,

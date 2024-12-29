@@ -74,8 +74,14 @@ impl Interpreter {
         }
     }
 
-    fn set_var(&mut self, id: String, value: Value) {
-        self.vars.insert(id, value);
+    fn set_var(&mut self, loc: Loc, id: String, value: Value) -> Result<(), ()> {
+        if let Some(var) = self.vars.get_mut(&id) {
+            *var = value;
+            Ok(())
+        } else {
+            print_error(loc, &format!("Assigning to undefined variable '{}'", id));
+            Err(())
+        }
     }
 
     fn get_var(&self, loc: Loc, id: &str) -> Result<&Value, ()> {
@@ -87,7 +93,7 @@ impl Interpreter {
         }
     }
 
-    fn eval_unary(&self, unary: Unary) -> Result<Value, ()> {
+    fn eval_unary(&mut self, unary: Unary) -> Result<Value, ()> {
         let loc = unary.expr.loc;
         let value = self.eval_expr(*unary.expr)?;
 
@@ -98,7 +104,7 @@ impl Interpreter {
         }
     }
 
-    fn eval_binary(&self, binary: Binary) -> Result<Value, ()> {
+    fn eval_binary(&mut self, binary: Binary) -> Result<Value, ()> {
         let left_loc = binary.left.loc;
         let left = self.eval_expr(*binary.left)?;
         let right_loc = binary.right.loc;
@@ -149,10 +155,15 @@ impl Interpreter {
         }
     }
 
-    fn eval_expr(&self, expr: LocExpr) -> Result<Value, ()> {
+    fn eval_expr(&mut self, expr: LocExpr) -> Result<Value, ()> {
         match expr.expr {
             Expr::Literal(value) => Ok(value),
             Expr::Var(id) => Ok(self.get_var(expr.loc, &id)?.clone()),
+            Expr::Assign(assign) => {
+                let value = self.eval_expr(*assign.expr)?;
+                self.set_var(expr.loc, assign.var, value.clone())?;
+                Ok(value)
+            }
             Expr::Unary(unary) => self.eval_unary(unary),
             Expr::Binary(binary) => self.eval_binary(binary),
         }
@@ -167,7 +178,10 @@ impl Interpreter {
                 let result = self.eval_expr(expr)?;
                 println!("{}", result.convert_to_string(false));
             }
-            Stmt::Var(loc, id, expr) => self.define_var(loc, id, self.eval_expr(expr)?)?,
+            Stmt::VarDecl(loc, id, expr) => {
+                let value = self.eval_expr(expr)?;
+                self.define_var(loc, id, value)?
+            }
         };
 
         Ok(())
