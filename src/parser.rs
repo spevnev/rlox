@@ -66,7 +66,7 @@ impl LocExpr {
 pub enum Stmt {
     Expr(LocExpr),
     Print(LocExpr),
-    Var(String, Option<LocExpr>),
+    Var(Loc, String, LocExpr),
 }
 
 struct Parser {
@@ -167,7 +167,7 @@ impl Parser {
             assert!(self.tokens.len() > 0);
             print_error(
                 self.tokens[self.tokens.len() - 1].loc,
-                "Expected expression but reached the end.".to_owned(),
+                "Expected expression but reached the end".to_owned(),
             );
             return Err(());
         }
@@ -194,7 +194,6 @@ impl Parser {
                 }
             }
             _ => {
-                println!("Value={:?}", token);
                 error_expected("expression", &token.value, token.loc)
             }
         }
@@ -326,16 +325,15 @@ impl Parser {
     fn parse_var_decl(&mut self) -> Result<Stmt, ()> {
         let id = self.expect(TokenKind::Identifier)?;
 
-        let mut init = None;
+        let mut init = LocExpr::new_literal((0, 0), Value::Null(()));
         if self.consume(&[TokenKind::Equal]) {
-            init = Some(self.parse_expr()?);
+            init = self.parse_expr()?;
         }
 
         let token = self.advance().unwrap();
         if token.kind == TokenKind::Semicolon {
-            Ok(Stmt::Var(id.value.to_identifier(id.loc)?, init))
+            Ok(Stmt::Var(id.loc, id.value.to_identifier(id.loc)?, init))
         } else {
-            println!("Value={:?}", token);
             print_error(
                 token.loc,
                 "Expected semicolon after the variable declaration".to_owned(),

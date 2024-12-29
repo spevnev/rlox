@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     error::{error_expected, print_error, Loc},
     lexer::{TokenKind, Value},
@@ -51,98 +53,131 @@ impl Value {
     }
 }
 
-fn eval_unary(unary: Unary) -> Result<Value, ()> {
-    let loc = unary.expr.loc;
-    let value = eval_expr(*unary.expr)?;
-
-    match unary.op {
-        TokenKind::Minus => Ok(Value::Number(-value.to_number(loc)?)),
-        TokenKind::Bang => Ok(Value::Bool(!value.is_true())),
-        _ => panic!("Unexpected unary operand: {:?}", unary.op),
-    }
+pub struct Interpreter {
+    vars: HashMap<String, Value>,
 }
 
-fn eval_binary(binary: Binary) -> Result<Value, ()> {
-    let left_loc = binary.left.loc;
-    let left = eval_expr(*binary.left)?;
-    let right_loc = binary.right.loc;
-    let right = eval_expr(*binary.right)?;
+impl Interpreter {
+    pub fn new() -> Interpreter {
+        Interpreter {
+            vars: HashMap::new(),
+        }
+    }
 
-    match binary.op {
-        TokenKind::EqualEqual => Ok(Value::Bool(left == right)),
-        TokenKind::BangEqual => Ok(Value::Bool(left != right)),
-        TokenKind::Greater => Ok(Value::Bool(
-            left.to_number(left_loc)? > right.to_number(right_loc)?,
-        )),
-        TokenKind::GreaterEqual => Ok(Value::Bool(
-            left.to_number(left_loc)? >= right.to_number(right_loc)?,
-        )),
-        TokenKind::Less => Ok(Value::Bool(
-            left.to_number(left_loc)? < right.to_number(right_loc)?,
-        )),
-        TokenKind::LessEqual => Ok(Value::Bool(
-            left.to_number(left_loc)? <= right.to_number(right_loc)?,
-        )),
-        TokenKind::Plus => {
-            if left.is_string() || right.is_string() {
-                Ok(Value::String(
-                    left.convert_to_string(false) + &right.convert_to_string(false),
-                ))
-            } else {
-                Ok(Value::Number(
-                    left.to_number(left_loc)? + right.to_number(right_loc)?,
-                ))
+    fn define_var(&mut self, loc: Loc, id: String, value: Value) -> Result<(), ()> {
+        if let None = self.vars.get(&id) {
+            self.vars.insert(id, value);
+            Ok(())
+        } else {
+            print_error(loc, format!("Redefinition of variable '{}'", id));
+            Err(())
+        }
+    }
+
+    fn set_var(&mut self, id: String, value: Value) {
+        self.vars.insert(id, value);
+    }
+
+    fn get_var(&self, loc: Loc, id: &str) -> Result<&Value, ()> {
+        if let Some(value) = self.vars.get(id) {
+            Ok(value)
+        } else {
+            print_error(loc, format!("Undefined variable '{}'", id));
+            Err(())
+        }
+    }
+
+    fn eval_unary(&self, unary: Unary) -> Result<Value, ()> {
+        let loc = unary.expr.loc;
+        let value = self.eval_expr(*unary.expr)?;
+
+        match unary.op {
+            TokenKind::Minus => Ok(Value::Number(-value.to_number(loc)?)),
+            TokenKind::Bang => Ok(Value::Bool(!value.is_true())),
+            _ => panic!("Unexpected unary operand: {:?}", unary.op),
+        }
+    }
+
+    fn eval_binary(&self, binary: Binary) -> Result<Value, ()> {
+        let left_loc = binary.left.loc;
+        let left = self.eval_expr(*binary.left)?;
+        let right_loc = binary.right.loc;
+        let right = self.eval_expr(*binary.right)?;
+
+        match binary.op {
+            TokenKind::EqualEqual => Ok(Value::Bool(left == right)),
+            TokenKind::BangEqual => Ok(Value::Bool(left != right)),
+            TokenKind::Greater => Ok(Value::Bool(
+                left.to_number(left_loc)? > right.to_number(right_loc)?,
+            )),
+            TokenKind::GreaterEqual => Ok(Value::Bool(
+                left.to_number(left_loc)? >= right.to_number(right_loc)?,
+            )),
+            TokenKind::Less => Ok(Value::Bool(
+                left.to_number(left_loc)? < right.to_number(right_loc)?,
+            )),
+            TokenKind::LessEqual => Ok(Value::Bool(
+                left.to_number(left_loc)? <= right.to_number(right_loc)?,
+            )),
+            TokenKind::Plus => {
+                if left.is_string() || right.is_string() {
+                    Ok(Value::String(
+                        left.convert_to_string(false) + &right.convert_to_string(false),
+                    ))
+                } else {
+                    Ok(Value::Number(
+                        left.to_number(left_loc)? + right.to_number(right_loc)?,
+                    ))
+                }
             }
-        }
-        TokenKind::Minus => Ok(Value::Number(
-            left.to_number(left_loc)? - right.to_number(right_loc)?,
-        )),
-        TokenKind::Star => Ok(Value::Number(
-            left.to_number(left_loc)? * right.to_number(right_loc)?,
-        )),
-        TokenKind::Slash => {
-            let denom = right.to_number(right_loc)?;
-            if denom == 0.0 {
-                print_error(right_loc, "Division by 0.".to_owned());
-                Err(())
-            } else {
-                Ok(Value::Number(left.to_number(left_loc)? / denom))
+            TokenKind::Minus => Ok(Value::Number(
+                left.to_number(left_loc)? - right.to_number(right_loc)?,
+            )),
+            TokenKind::Star => Ok(Value::Number(
+                left.to_number(left_loc)? * right.to_number(right_loc)?,
+            )),
+            TokenKind::Slash => {
+                let denom = right.to_number(right_loc)?;
+                if denom == 0.0 {
+                    print_error(right_loc, "Division by 0".to_owned());
+                    Err(())
+                } else {
+                    Ok(Value::Number(left.to_number(left_loc)? / denom))
+                }
             }
+            _ => panic!("Unexpected binary operand: {:?}", binary.op),
         }
-        _ => panic!("Unexpected binary operand: {:?}", binary.op),
-    }
-}
-
-fn eval_expr(expr: LocExpr) -> Result<Value, ()> {
-    match expr.expr {
-        Expr::Literal(value) => Ok(value),
-        Expr::Var(id) => todo!(),
-        Expr::Unary(unary) => eval_unary(unary),
-        Expr::Binary(binary) => eval_binary(binary),
-    }
-}
-
-fn eval_stmt(stmt: Stmt) -> Result<(), ()> {
-    match stmt {
-        Stmt::Expr(expr) => {
-            let _ = eval_expr(expr)?;
-        }
-        Stmt::Print(expr) => {
-            let result = eval_expr(expr)?;
-            println!("{}", result.convert_to_string(false));
-        }
-        Stmt::Var(id, init) => {
-            todo!()
-        }
-    };
-
-    Ok(())
-}
-
-pub fn eval(stmts: Vec<Stmt>) -> Result<(), ()> {
-    for stmt in stmts {
-        eval_stmt(stmt)?;
     }
 
-    Ok(())
+    fn eval_expr(&self, expr: LocExpr) -> Result<Value, ()> {
+        match expr.expr {
+            Expr::Literal(value) => Ok(value),
+            Expr::Var(id) => Ok(self.get_var(expr.loc, &id)?.clone()),
+            Expr::Unary(unary) => self.eval_unary(unary),
+            Expr::Binary(binary) => self.eval_binary(binary),
+        }
+    }
+
+    fn eval_stmt(&mut self, stmt: Stmt) -> Result<(), ()> {
+        match stmt {
+            Stmt::Expr(expr) => {
+                let _ = self.eval_expr(expr)?;
+            }
+            Stmt::Print(expr) => {
+                let result = self.eval_expr(expr)?;
+                println!("{}", result.convert_to_string(false));
+            }
+            Stmt::Var(loc, id, expr) => self.define_var(loc, id, self.eval_expr(expr)?)?,
+        };
+
+        Ok(())
+    }
+
+    pub fn eval(&mut self, stmts: Vec<Stmt>) -> Result<(), ()> {
+        for stmt in stmts {
+            self.eval_stmt(stmt)?;
+        }
+
+        Ok(())
+    }
 }

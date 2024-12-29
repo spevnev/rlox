@@ -4,16 +4,19 @@ use std::{
     process::{self, ExitCode},
 };
 
+use interpreter::Interpreter;
+use parser::Stmt;
+
 mod error;
 mod interpreter;
 mod lexer;
 mod parser;
 mod print;
 
-fn run(source: &str) -> Result<(), ()> {
+fn parse(source: &str) -> Result<Vec<Stmt>, ()> {
     let tokens = lexer::get_tokens(source)?;
     if tokens.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     println!("Tokens:");
@@ -28,12 +31,12 @@ fn run(source: &str) -> Result<(), ()> {
     print::print_ast(&stmts);
     println!();
 
-    interpreter::eval(stmts)?;
-
-    Ok(())
+    Ok(stmts)
 }
 
 fn run_repl() {
+    let mut interpreter = Interpreter::new();
+
     loop {
         print!("> ");
         stdout().flush().unwrap();
@@ -45,7 +48,10 @@ fn run_repl() {
             break;
         }
 
-        let _ = run(&line);
+        let stmts = parse(&line);
+        if stmts.is_ok() {
+            let _ = interpreter.eval(stmts.unwrap());
+        }
     }
 }
 
@@ -55,7 +61,10 @@ fn run_file(path: &str) {
         process::exit(1);
     });
 
-    run(&source).unwrap_or_else(|_| process::exit(1));
+    let stmts = parse(&source).unwrap_or_else(|_| process::exit(1));
+    Interpreter::new()
+        .eval(stmts)
+        .unwrap_or_else(|_| process::exit(1));
 }
 
 fn usage(program: &str) {

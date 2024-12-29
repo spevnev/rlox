@@ -26,12 +26,9 @@ fn print_stmt(stmt: &Stmt) {
             print!("Print ");
             print_expr(expr);
         }
-        Stmt::Var(id, init) => {
-            print!("Var {}", id);
-            init.as_ref().inspect(|init_expr| {
-                print!(" = ");
-                print_expr(init_expr);
-            });
+        Stmt::Var(_, id, init_expr) => {
+            print!("Var {} = ", id);
+            print_expr(init_expr);
         }
     }
 }
