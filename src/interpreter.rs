@@ -1,7 +1,7 @@
 use crate::{
     error::{error_expected, print_error, Loc},
     lexer::{TokenKind, Value},
-    parser::{Binary, Expr, LocExpr, Stmt, StmtKind, Unary},
+    parser::{Binary, Expr, LocExpr, Stmt, Unary},
 };
 
 impl Value {
@@ -24,6 +24,13 @@ impl Value {
         match self {
             Value::Number(num) => Ok(num.clone()),
             _ => error_expected("number", self, loc),
+        }
+    }
+
+    pub fn to_identifier(&self, loc: Loc) -> Result<String, ()> {
+        match self {
+            Value::Identifier(id) => Ok(id.clone()),
+            _ => error_expected("identifier", self, loc),
         }
     }
 
@@ -109,17 +116,24 @@ fn eval_binary(binary: Binary) -> Result<Value, ()> {
 fn eval_expr(expr: LocExpr) -> Result<Value, ()> {
     match expr.expr {
         Expr::Literal(value) => Ok(value),
+        Expr::Var(id) => todo!(),
         Expr::Unary(unary) => eval_unary(unary),
         Expr::Binary(binary) => eval_binary(binary),
     }
 }
 
 fn eval_stmt(stmt: Stmt) -> Result<(), ()> {
-    let result = eval_expr(stmt.expr)?;
-
-    match stmt.kind {
-        StmtKind::Expr => {}
-        StmtKind::Print => println!("{}", result.convert_to_string(false)),
+    match stmt {
+        Stmt::Expr(expr) => {
+            let _ = eval_expr(expr)?;
+        }
+        Stmt::Print(expr) => {
+            let result = eval_expr(expr)?;
+            println!("{}", result.convert_to_string(false));
+        }
+        Stmt::Var(id, init) => {
+            todo!()
+        }
     };
 
     Ok(())

@@ -16,6 +16,7 @@ pub struct Binary {
 
 pub enum Expr {
     Literal(Value),
+    Var(String),
     Unary(Unary),
     Binary(Binary),
 }
@@ -30,6 +31,13 @@ impl LocExpr {
         LocExpr {
             loc,
             expr: Expr::Literal(value),
+        }
+    }
+
+    fn new_var(loc: Loc, id: String) -> LocExpr {
+        LocExpr {
+            loc,
+            expr: Expr::Var(id),
         }
     }
 
@@ -55,15 +63,10 @@ impl LocExpr {
     }
 }
 
-#[derive(Debug)]
-pub enum StmtKind {
-    Expr,
-    Print,
-}
-
-pub struct Stmt {
-    pub expr: LocExpr,
-    pub kind: StmtKind,
+pub enum Stmt {
+    Expr(LocExpr),
+    Print(LocExpr),
+    Var(String, Option<LocExpr>),
 }
 
 struct Parser {
@@ -104,6 +107,60 @@ impl Parser {
         false
     }
 
+    fn consume(&mut self, kinds: &[TokenKind]) -> bool {
+        if self.index >= self.tokens.len() {
+            return false;
+        }
+
+        if self.is_next(kinds) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn expect(&mut self, kind: TokenKind) -> Result<Token, ()> {
+        if self.index >= self.tokens.len() {
+            assert!(self.tokens.len() > 0);
+            print_error(
+                self.tokens[self.tokens.len() - 1].loc,
+                format!("Expected {:?} but reached the end", kind),
+            );
+            return Err(());
+        }
+
+        if self.is_next(&[kind.clone()]) {
+            Ok(self.advance().unwrap())
+        } else {
+            error_expected(
+                &format!("{:?}", kind),
+                &self.tokens[self.index].value,
+                self.tokens[self.index].loc,
+            )
+        }
+    }
+
+    // Discards all the tokens until the next statement before entering panic mode
+    fn sync(&mut self) {
+        while !self.is_done() && !self.consume(&[TokenKind::Semicolon]) {
+            self.advance();
+
+            if self.is_next(&[
+                TokenKind::Class,
+                TokenKind::Fun,
+                TokenKind::Var,
+                TokenKind::For,
+                TokenKind::While,
+                TokenKind::If,
+                TokenKind::Print,
+                TokenKind::Return,
+            ]) {
+                return;
+            }
+        }
+    }
+
     fn parse_primary(&mut self) -> Result<LocExpr, ()> {
         let opt_token = self.advance();
         if opt_token.is_none() {
@@ -123,17 +180,23 @@ impl Parser {
             TokenKind::False => Ok(LocExpr::new_literal(token.loc, Value::Bool(false))),
             TokenKind::True => Ok(LocExpr::new_literal(token.loc, Value::Bool(true))),
             TokenKind::Null => Ok(LocExpr::new_literal(token.loc, Value::Null(()))),
+            TokenKind::Identifier => Ok(LocExpr::new_var(
+                token.loc,
+                token.value.to_identifier(token.loc)?,
+            )),
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
-                if self.is_next(&[TokenKind::RightParen]) {
-                    self.advance();
+                if self.consume(&[TokenKind::RightParen]) {
                     Ok(expr)
                 } else {
                     print_error(token.loc, "Unclosed '('".to_owned());
                     Err(())
                 }
             }
-            _ => error_expected("expression", &token.value, token.loc),
+            _ => {
+                println!("Value={:?}", token);
+                error_expected("expression", &token.value, token.loc)
+            }
         }
     }
 
@@ -204,45 +267,113 @@ impl Parser {
         self.parse_equality()
     }
 
-    fn parse_stmt(&mut self) -> Result<Stmt, ()> {
-        let mut kind = StmtKind::Expr;
-        if self.is_next(&[TokenKind::Print]) {
-            self.advance();
-            kind = StmtKind::Print;
-        }
-
+    fn parse_expr_stmt(&mut self) -> Result<Stmt, ()> {
         let expr = self.parse_expr()?;
-        let opt_token = self.advance();
 
-        if opt_token.is_none() {
+        if self.is_done() {
             assert!(self.tokens.len() > 0);
             print_error(
                 self.tokens[self.tokens.len() - 1].loc,
-                "Expected semicolon after the statement".to_owned(),
+                "Expected semicolon after the statement but reached the end".to_owned(),
             );
             return Err(());
         }
 
-        let token = opt_token.unwrap();
+        let token = self.advance().unwrap();
         if token.kind == TokenKind::Semicolon {
-            Ok(Stmt { expr, kind })
+            Ok(Stmt::Expr(expr))
         } else {
-            error_expected("semicolon after the statement", &token.value, token.loc)
+            print_error(
+                token.loc,
+                "Expected semicolon after the statement".to_owned(),
+            );
+            Err(())
+        }
+    }
+
+    fn parse_print_stmt(&mut self) -> Result<Stmt, ()> {
+        let expr = self.parse_expr()?;
+
+        if self.is_done() {
+            assert!(self.tokens.len() > 0);
+            print_error(
+                self.tokens[self.tokens.len() - 1].loc,
+                "Expected semicolon after the print statement but reached the end".to_owned(),
+            );
+            return Err(());
+        }
+
+        let token = self.advance().unwrap();
+        if token.kind == TokenKind::Semicolon {
+            Ok(Stmt::Print(expr))
+        } else {
+            print_error(
+                token.loc,
+                "Expected semicolon after the print statement".to_owned(),
+            );
+            Err(())
+        }
+    }
+
+    fn parse_stmt(&mut self) -> Result<Stmt, ()> {
+        if self.consume(&[TokenKind::Print]) {
+            self.parse_print_stmt()
+        } else {
+            self.parse_expr_stmt()
+        }
+    }
+
+    fn parse_var_decl(&mut self) -> Result<Stmt, ()> {
+        let id = self.expect(TokenKind::Identifier)?;
+
+        let mut init = None;
+        if self.consume(&[TokenKind::Equal]) {
+            init = Some(self.parse_expr()?);
+        }
+
+        let token = self.advance().unwrap();
+        if token.kind == TokenKind::Semicolon {
+            Ok(Stmt::Var(id.value.to_identifier(id.loc)?, init))
+        } else {
+            println!("Value={:?}", token);
+            print_error(
+                token.loc,
+                "Expected semicolon after the variable declaration".to_owned(),
+            );
+            Err(())
+        }
+    }
+
+    fn parse_decl(&mut self) -> Result<Stmt, ()> {
+        if self.consume(&[TokenKind::Var]) {
+            self.parse_var_decl()
+        } else {
+            self.parse_stmt()
         }
     }
 
     fn parse(&mut self) -> Result<Vec<Stmt>, ()> {
         let mut stmts: Vec<Stmt> = Vec::new();
+        let mut has_error = false;
 
         while !self.is_done() {
-            stmts.push(self.parse_stmt()?);
+            if let Ok(stmt) = self.parse_decl() {
+                stmts.push(stmt);
+            } else {
+                self.sync();
+                has_error = true;
+            }
         }
 
-        assert!(
-            self.index == self.tokens.len(),
-            "Parser must reach the end of tokens"
-        );
-        Ok(stmts)
+        if has_error {
+            Err(())
+        } else {
+            assert!(
+                self.index == self.tokens.len(),
+                "Parser must reach the end of tokens"
+            );
+            Ok(stmts)
+        }
     }
 }
 

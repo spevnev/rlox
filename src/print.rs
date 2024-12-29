@@ -1,27 +1,44 @@
 use crate::parser::{Expr, LocExpr, Stmt};
 
-fn print_ast_rec(expr: &Expr) {
-    match expr {
+fn print_expr(expr: &LocExpr) {
+    match &expr.expr {
+        Expr::Literal(value) => print!("{}", value.convert_to_string(true)),
+        Expr::Var(id) => print!("{}", id),
         Expr::Unary(unary) => {
             print!("({:?} ", unary.op);
-            print_ast_rec(&unary.expr.expr);
+            print_expr(&unary.expr);
             print!(")");
         }
         Expr::Binary(binary) => {
             print!("(");
-            print_ast_rec(&binary.left.expr);
+            print_expr(&binary.left);
             print!(" {:?} ", binary.op);
-            print_ast_rec(&binary.right.expr);
+            print_expr(&binary.right);
             print!(")");
         }
-        Expr::Literal(value) => print!("{}", value.convert_to_string(true)),
     };
+}
+
+fn print_stmt(stmt: &Stmt) {
+    match stmt {
+        Stmt::Expr(expr) => print_expr(expr),
+        Stmt::Print(expr) => {
+            print!("Print ");
+            print_expr(expr);
+        }
+        Stmt::Var(id, init) => {
+            print!("Var {}", id);
+            init.as_ref().inspect(|init_expr| {
+                print!(" = ");
+                print_expr(init_expr);
+            });
+        }
+    }
 }
 
 pub fn print_ast(stmts: &Vec<Stmt>) {
     for stmt in stmts {
-        print!("{:?}", stmt.kind);
-        print_ast_rec(&stmt.expr.expr);
+        print_stmt(&stmt);
         print!("\n");
     }
 }

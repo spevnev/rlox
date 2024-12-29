@@ -24,7 +24,7 @@ fn run(source: &str) -> Result<(), ()> {
 
     let stmts = parser::parse(tokens)?;
 
-    println!("AST:");
+    println!("Statements AST:");
     print::print_ast(&stmts);
     println!();
 
