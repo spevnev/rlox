@@ -1,21 +1,20 @@
 use std::collections::HashMap;
 
 use crate::{
-    error::{print_error, Loc},
+    error::{error, Loc},
     lexer::{TokenKind, Value},
     parser::{Binary, Expr, LocExpr, Stmt, Unary},
 };
 
 impl Value {
-    fn error_expected<T>(&self, loc: Loc, expected: &str) -> Result<T, ()> {
-        print_error(
+    fn type_expected_error<T>(&self, loc: Loc, expected: &str) -> Result<T, ()> {
+        error(
             loc,
             &format!(
                 "Expected {expected} but found '{}'",
                 self.convert_to_string(true)
             ),
-        );
-        Err(())
+        )
     }
 
     fn is_string(&self) -> bool {
@@ -35,24 +34,8 @@ impl Value {
 
     fn to_number(&self, loc: Loc) -> Result<f64, ()> {
         match self {
-            Value::Number(num) => Ok(num.clone()),
-            _ => self.error_expected(loc, "number"),
-        }
-    }
-
-    pub fn convert_to_string(&self, quote_string: bool) -> String {
-        match self {
-            Value::Number(number) => number.to_string(),
-            Value::String(string) => {
-                if quote_string {
-                    format!("\"{string}\"")
-                } else {
-                    string.to_owned()
-                }
-            }
-            Value::Identifier(identifier) => identifier.to_owned(),
-            Value::Bool(bool) => bool.to_string(),
-            Value::Null(()) => "null".to_owned(),
+            Value::Number(num) => Ok(*num),
+            _ => self.type_expected_error(loc, "number"),
         }
     }
 }
@@ -74,38 +57,35 @@ impl Interpreter {
         }
     }
 
-    fn define_var(&mut self, loc: Loc, id: String, value: Value) -> Result<(), ()> {
+    fn define_var(&mut self, loc: Loc, var: String, value: Value) -> Result<(), ()> {
         let scope = self.scopes.last_mut().unwrap();
-        if let None = scope.vars.get(&id) {
-            scope.vars.insert(id, value);
+        if !scope.vars.contains_key(&var) {
+            scope.vars.insert(var, value);
             Ok(())
         } else {
-            print_error(loc, &format!("Redefinition of variable '{}'", id));
-            Err(())
+            error(loc, &format!("Redefinition of variable '{}'", var))
         }
     }
 
-    fn set_var(&mut self, loc: Loc, id: String, value: Value) -> Result<(), ()> {
+    fn set_var(&mut self, loc: Loc, var: &str, value: Value) -> Result<(), ()> {
         for scope in self.scopes.iter_mut().rev() {
-            if let Some(var) = scope.vars.get_mut(&id) {
+            if let Some(var) = scope.vars.get_mut(var) {
                 *var = value;
                 return Ok(());
             }
         }
 
-        print_error(loc, &format!("Assigning to undefined variable '{}'", id));
-        Err(())
+        error(loc, &format!("Assigning to undefined variable '{}'", var))
     }
 
-    fn get_var(&self, loc: Loc, id: &str) -> Result<&Value, ()> {
+    fn get_var(&self, loc: Loc, var: &str) -> Result<&Value, ()> {
         for scope in self.scopes.iter().rev() {
-            if let Some(value) = scope.vars.get(id) {
+            if let Some(value) = scope.vars.get(var) {
                 return Ok(value);
             }
         }
 
-        print_error(loc, &format!("Undefined variable '{}'", id));
-        Err(())
+        error(loc, &format!("Undefined variable '{}'", var))
     }
 
     fn eval_unary(&mut self, unary: Unary) -> Result<Value, ()> {
@@ -160,8 +140,7 @@ impl Interpreter {
             TokenKind::Slash => {
                 let denom = right.to_number(right_loc)?;
                 if denom == 0.0 {
-                    print_error(right_loc, "Division by 0");
-                    Err(())
+                    error(right_loc, "Division by 0")
                 } else {
                     Ok(Value::Number(left.to_number(left_loc)? / denom))
                 }
@@ -173,14 +152,14 @@ impl Interpreter {
     fn eval_expr(&mut self, expr: LocExpr) -> Result<Value, ()> {
         match expr.expr {
             Expr::Literal(value) => Ok(value),
-            Expr::Var(id) => Ok(self.get_var(expr.loc, &id)?.clone()),
-            Expr::Assign(assign) => {
-                let value = self.eval_expr(*assign.expr)?;
-                self.set_var(expr.loc, assign.var, value.clone())?;
-                Ok(value)
-            }
             Expr::Unary(unary) => self.eval_unary(unary),
             Expr::Binary(binary) => self.eval_binary(binary),
+            Expr::Var(var) => Ok(self.get_var(expr.loc, &var)?.clone()),
+            Expr::Assign(assign) => {
+                let value = self.eval_expr(*assign.expr)?;
+                self.set_var(expr.loc, &assign.var, value.clone())?;
+                Ok(value)
+            }
         }
     }
 
@@ -193,9 +172,9 @@ impl Interpreter {
                 let result = self.eval_expr(expr)?;
                 println!("{}", result.convert_to_string(false));
             }
-            Stmt::VarDecl(loc, id, expr) => {
+            Stmt::VarDecl(var, expr) => {
                 let value = self.eval_expr(expr)?;
-                self.define_var(loc, id, value)?
+                self.define_var(var.loc, var.to_identifier()?, value)?
             }
             Stmt::Block(stmts) => {
                 self.scopes.push(Scope {

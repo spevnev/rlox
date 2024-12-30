@@ -1,7 +1,7 @@
 use std::{
     env, fs,
     io::{stdin, stdout, Write},
-    process::{self, ExitCode},
+    process::ExitCode,
 };
 
 use interpreter::Interpreter;
@@ -12,26 +12,27 @@ mod lexer;
 mod parser;
 mod print;
 
-
-fn run_repl() {
+fn run_repl() -> ExitCode {
     let mut interpreter = Interpreter::new();
+    let mut line = String::new();
 
     loop {
         print!("> ");
         stdout().flush().unwrap();
 
-        let mut line = String::new();
+        line.clear();
         let size = stdin().read_line(&mut line).unwrap();
         if size == 0 {
             // Ctrl-D
             break;
         }
 
-        let tokens = lexer::get_tokens(&line);
+        let tokens = lexer::tokenize(&line);
         if tokens.is_err() {
             continue;
         }
 
+        // TODO: Allow expressions and print their result
         let stmts = parser::parse(tokens.unwrap());
         if stmts.is_err() {
             continue;
@@ -39,43 +40,49 @@ fn run_repl() {
 
         let _ = interpreter.eval(stmts.unwrap());
     }
+
+    ExitCode::SUCCESS
 }
 
-fn run_file(path: &str) {
-    let source = fs::read_to_string(path).unwrap_or_else(|err| {
-        eprintln!("Unable to read file \"{path}\": {err}");
-        process::exit(1);
-    });
+fn run_file(path: &str) -> ExitCode {
+    let source = match fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => {
+            eprintln!("Unable to read file \"{path}\": {error}");
+            return ExitCode::FAILURE;
+        }
+    };
 
-    let tokens = lexer::get_tokens(&source).unwrap_or_else(|_| process::exit(1));
-    let stmts = parser::parse(tokens).unwrap_or_else(|_| process::exit(1));
-    Interpreter::new()
-        .eval(stmts)
-        .unwrap_or_else(|_| process::exit(1));
+    let Ok(tokens) = lexer::tokenize(&source) else {
+        return ExitCode::FAILURE;
+    };
+    let Ok(stmts) = parser::parse(tokens) else {
+        return ExitCode::FAILURE;
+    };
+    let Ok(_) = Interpreter::new().eval(stmts) else {
+        return ExitCode::FAILURE;
+    };
+
+    ExitCode::SUCCESS
 }
 
-fn usage(program: &str) {
+fn usage(program: &str) -> ExitCode {
     eprintln!("usage:");
     eprintln!("{program}        - REPL");
     eprintln!("{program} [path] - interpret file");
+
+    ExitCode::FAILURE
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
-    let program = args[0].split('/').last().unwrap();
 
     match args.len() {
-        1 => {
-            run_repl();
-            ExitCode::SUCCESS
-        }
-        2 => {
-            run_file(&args[1]);
-            ExitCode::SUCCESS
-        }
+        1 => run_repl(),
+        2 => run_file(&args[1]),
         _ => {
-            usage(program);
-            ExitCode::FAILURE
+            let program = args[0].split('/').last().unwrap();
+            usage(program)
         }
     }
 }

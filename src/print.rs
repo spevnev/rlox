@@ -15,7 +15,7 @@ fn print_expr(expr: &LocExpr) {
             print_expr(&binary.right);
             print!(")");
         }
-        Expr::Var(id) => print!("{}", id),
+        Expr::Var(var) => print!("{}", var),
         Expr::Assign(assign) => {
             print!("({} = ", assign.var);
             print_expr(&assign.expr);
@@ -31,8 +31,8 @@ fn print_stmt(stmt: &Stmt) {
             print!("Print ");
             print_expr(expr);
         }
-        Stmt::VarDecl(_, id, expr) => {
-            print!("Var {} = ", id);
+        Stmt::VarDecl(var, expr) => {
+            print!("Var {} = ", var.to_identifier().unwrap());
             print_expr(expr);
         }
         Stmt::Block(stmts) => {

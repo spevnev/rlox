@@ -1,6 +1,6 @@
 use std::env;
 
-use crate::error::{print_error, Loc};
+use crate::error::{error, print_error, Loc};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
@@ -49,6 +49,51 @@ pub enum TokenKind {
     While,
 }
 
+impl TokenKind {
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            TokenKind::LeftParen => "(",
+            TokenKind::RightParen => ")",
+            TokenKind::LeftBrace => "{",
+            TokenKind::RightBrace => "}",
+            TokenKind::Comma => ",",
+            TokenKind::Dot => ".",
+            TokenKind::Minus => "-",
+            TokenKind::Plus => "+",
+            TokenKind::Semicolon => ";",
+            TokenKind::Star => "*",
+            TokenKind::Slash => "/",
+            TokenKind::Bang => "!",
+            TokenKind::BangEqual => "!=",
+            TokenKind::Equal => "=",
+            TokenKind::EqualEqual => "==",
+            TokenKind::Greater => ">",
+            TokenKind::GreaterEqual => ">=",
+            TokenKind::Less => "<",
+            TokenKind::LessEqual => "<=",
+            TokenKind::Identifier => "identifier",
+            TokenKind::String => "string",
+            TokenKind::Number => "number",
+            TokenKind::And => "and",
+            TokenKind::Class => "class",
+            TokenKind::Else => "else",
+            TokenKind::False => "false",
+            TokenKind::Fun => "fun",
+            TokenKind::For => "for",
+            TokenKind::If => "if",
+            TokenKind::Null => "null",
+            TokenKind::Or => "or",
+            TokenKind::Print => "print",
+            TokenKind::Return => "return",
+            TokenKind::Super => "super",
+            TokenKind::This => "this",
+            TokenKind::True => "true",
+            TokenKind::Var => "var",
+            TokenKind::While => "while",
+        }
+    }
+}
+
 static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "and"    => TokenKind::And,
     "class"  => TokenKind::Class,
@@ -77,11 +122,56 @@ pub enum Value {
     Null(()),
 }
 
+impl Value {
+    pub fn convert_to_string(&self, quote_string: bool) -> String {
+        match self {
+            Value::Number(number) => number.to_string(),
+            Value::String(string) => {
+                // Quoting differentiates identifier and string in error messages.
+                if quote_string {
+                    format!("\"{string}\"")
+                } else {
+                    string.to_owned()
+                }
+            }
+            Value::Identifier(identifier) => identifier.to_owned(),
+            Value::Bool(bool) => bool.to_string(),
+            Value::Null(()) => "null".to_owned(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
     pub value: Value,
     pub loc: Loc,
+    pub len: usize,
+}
+
+impl Token {
+    fn to_error_string(&self) -> String {
+        match self.kind {
+            TokenKind::Number | TokenKind::String | TokenKind::Identifier => {
+                self.value.convert_to_string(true)
+            }
+            _ => self.kind.to_string().to_owned(),
+        }
+    }
+
+    fn type_expected_error<T>(&self, expected: &str) -> Result<T, ()> {
+        error(
+            self.loc,
+            &format!("Expected {expected} but found '{}'", self.to_error_string()),
+        )
+    }
+
+    pub fn to_identifier(&self) -> Result<String, ()> {
+        match &self.value {
+            Value::Identifier(id) => Ok(id.to_owned()),
+            _ => self.type_expected_error("identifier"),
+        }
+    }
 }
 
 struct Lexer {
@@ -92,7 +182,7 @@ struct Lexer {
 }
 
 impl Lexer {
-    pub fn new(source: &str) -> Lexer {
+    fn new(source: &str) -> Lexer {
         Lexer {
             source: source.chars().collect(),
             index: 0,
@@ -101,20 +191,20 @@ impl Lexer {
         }
     }
 
+    fn current_loc(&self) -> Loc {
+        (self.line, self.index - self.line_index + 1)
+    }
+
     fn is_done(&self) -> bool {
         self.index >= self.source.len()
     }
 
-    fn loc(&self) -> Loc {
-        (self.line, self.index - self.line_index + 1)
-    }
-
+    // Update location on '\n'.
     fn next_line(&mut self) {
         self.line_index = self.index;
         self.line += 1;
     }
 
-    // Return current char without advancing
     fn peek(&self) -> Option<char> {
         if self.is_done() {
             return None;
@@ -123,7 +213,6 @@ impl Lexer {
         Some(self.source[self.index])
     }
 
-    // Return current char and advances
     fn advance(&mut self) -> Option<char> {
         if self.is_done() {
             return None;
@@ -134,7 +223,7 @@ impl Lexer {
         Some(ch)
     }
 
-    // Advances if the next char is `c`
+    // Advances if the next char is `c`.
     fn consume(&mut self, c: char) -> bool {
         if self.is_done() || self.source[self.index] != c {
             return false;
@@ -143,23 +232,16 @@ impl Lexer {
         self.index += 1;
         true
     }
-
-    // Advances until the current char is `c` or the end
-    fn advance_until(&mut self, c: char) {
-        while !self.is_done() && self.source[self.index] != c {
-            self.index += 1;
-        }
-    }
 }
 
-pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
-    let mut tokens: Vec<Token> = Vec::new();
+pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
     let mut lexer = Lexer::new(source);
+    let mut tokens: Vec<Token> = Vec::new();
     let mut has_error = false;
 
     while !lexer.is_done() {
         let start = lexer.index;
-        let loc = lexer.loc();
+        let loc = lexer.current_loc();
 
         let mut value = Value::Null(());
         let kind = match lexer.advance().unwrap() {
@@ -168,7 +250,6 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                 lexer.next_line();
                 continue;
             }
-
             '(' => TokenKind::LeftParen,
             ')' => TokenKind::RightParen,
             '{' => TokenKind::LeftBrace,
@@ -179,11 +260,15 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
             '+' => TokenKind::Plus,
             ';' => TokenKind::Semicolon,
             '*' => TokenKind::Star,
-
             '/' => {
                 if lexer.consume('/') {
-                    lexer.advance_until('\n');
-                    continue; // Comments don't produce tokens
+                    while let Some(c) = lexer.peek() {
+                        if c == '\n' {
+                            break;
+                        }
+                        lexer.advance();
+                    }
+                    continue; // Comments don't produce tokens.
                 } else {
                     TokenKind::Slash
                 }
@@ -216,7 +301,6 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                     TokenKind::Less
                 }
             }
-
             '"' => {
                 let mut backslashes = 0;
                 let mut is_terminated = false;
@@ -235,8 +319,7 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                 }
 
                 if !is_terminated {
-                    print_error(loc, "Unterminated string");
-                    return Err(());
+                    return error(loc, "Unterminated string");
                 }
 
                 value = Value::String(source[(start + 1)..(lexer.index - 1)].to_owned());
@@ -282,7 +365,6 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
                     continue;
                 }
             }
-
             c => {
                 print_error(loc, &format!("Unknown character '{c}'"));
                 has_error = true;
@@ -290,20 +372,25 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
             }
         };
 
-        tokens.push(Token { kind, value, loc });
+        tokens.push(Token {
+            kind,
+            value,
+            loc,
+            len: lexer.index - start,
+        });
     }
 
     if env::var("DEBUG").is_ok_and(|value| value == "1") {
         println!("Tokens:");
         for token in &tokens {
-            println!("{token:?} ");
+            println!("{token:?}");
         }
         println!();
     }
 
-    if has_error {
-        Err(())
-    } else {
+    if !has_error {
         Ok(tokens)
+    } else {
+        Err(())
     }
 }
