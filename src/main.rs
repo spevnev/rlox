@@ -50,7 +50,7 @@ fn run_file(path: &str) -> ExitCode {
         Err(error) => {
             eprintln!("Unable to read file \"{path}\": {error}");
             return ExitCode::FAILURE;
-        }
+        },
     };
 
     let Ok(tokens) = lexer::tokenize(&source) else {
@@ -83,6 +83,7 @@ fn main() -> ExitCode {
         _ => {
             let program = args[0].split('/').last().unwrap();
             usage(program)
-        }
+        },
     }
 }
+

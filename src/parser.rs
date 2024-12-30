@@ -210,7 +210,7 @@ impl Parser {
         match token.kind {
             TokenKind::Number | TokenKind::String => {
                 Ok(LocExpr::new_literal(token.loc, token.value))
-            }
+            },
             TokenKind::False => Ok(LocExpr::new_literal(token.loc, Value::Bool(false))),
             TokenKind::True => Ok(LocExpr::new_literal(token.loc, Value::Bool(true))),
             TokenKind::Null => Ok(LocExpr::new_literal(token.loc, Value::Null(()))),
@@ -222,7 +222,7 @@ impl Parser {
                 } else {
                     error(self.loc_after_prev(), "Unclosed '(', expected ')'")
                 }
-            }
+            },
             _ => error(token.loc, "Expected expression"),
         }
     }
@@ -298,7 +298,7 @@ impl Parser {
                 Expr::Var(var) => {
                     let r_expr = self.parse_expr()?;
                     Ok(LocExpr::new_assign(l_expr.loc, var, r_expr))
-                }
+                },
                 _ => error(l_expr.loc, "Invalid l-value"),
             }
         } else {

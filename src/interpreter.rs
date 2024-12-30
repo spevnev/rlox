@@ -51,9 +51,7 @@ pub struct Interpreter {
 impl Interpreter {
     pub fn new() -> Interpreter {
         Interpreter {
-            scopes: vec![Scope {
-                vars: HashMap::new(),
-            }],
+            scopes: vec![Scope { vars: HashMap::new() }],
         }
     }
 
@@ -130,7 +128,7 @@ impl Interpreter {
                         left.to_number(left_loc)? + right.to_number(right_loc)?,
                     ))
                 }
-            }
+            },
             TokenKind::Minus => Ok(Value::Number(
                 left.to_number(left_loc)? - right.to_number(right_loc)?,
             )),
@@ -144,7 +142,7 @@ impl Interpreter {
                 } else {
                     Ok(Value::Number(left.to_number(left_loc)? / denom))
                 }
-            }
+            },
             _ => panic!("Unexpected binary operand: {:?}", binary.op),
         }
     }
@@ -159,7 +157,7 @@ impl Interpreter {
                 let value = self.eval_expr(*assign.expr)?;
                 self.set_var(expr.loc, &assign.var, value.clone())?;
                 Ok(value)
-            }
+            },
         }
     }
 
@@ -167,26 +165,24 @@ impl Interpreter {
         match stmt {
             Stmt::Expr(expr) => {
                 let _ = self.eval_expr(expr)?;
-            }
+            },
             Stmt::Print(expr) => {
                 let result = self.eval_expr(expr)?;
                 println!("{}", result.convert_to_string(false));
-            }
+            },
             Stmt::VarDecl(var, expr) => {
                 let value = self.eval_expr(expr)?;
                 self.define_var(var.loc, var.to_identifier()?, value)?
-            }
+            },
             Stmt::Block(stmts) => {
-                self.scopes.push(Scope {
-                    vars: HashMap::new(),
-                });
+                self.scopes.push(Scope { vars: HashMap::new() });
 
                 for stmt in stmts {
                     self.eval_stmt(stmt)?;
                 }
 
                 self.scopes.pop();
-            }
+            },
         };
 
         Ok(())

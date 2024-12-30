@@ -133,7 +133,7 @@ impl Value {
                 } else {
                     string.to_owned()
                 }
-            }
+            },
             Value::Identifier(identifier) => identifier.to_owned(),
             Value::Bool(bool) => bool.to_string(),
             Value::Null(()) => "null".to_owned(),
@@ -154,7 +154,7 @@ impl Token {
         match self.kind {
             TokenKind::Number | TokenKind::String | TokenKind::Identifier => {
                 self.value.convert_to_string(true)
-            }
+            },
             _ => self.kind.to_string().to_owned(),
         }
     }
@@ -249,7 +249,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
             '\n' => {
                 lexer.next_line();
                 continue;
-            }
+            },
             '(' => TokenKind::LeftParen,
             ')' => TokenKind::RightParen,
             '{' => TokenKind::LeftBrace,
@@ -272,35 +272,35 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                 } else {
                     TokenKind::Slash
                 }
-            }
+            },
             '!' => {
                 if lexer.consume('=') {
                     TokenKind::BangEqual
                 } else {
                     TokenKind::Bang
                 }
-            }
+            },
             '=' => {
                 if lexer.consume('=') {
                     TokenKind::EqualEqual
                 } else {
                     TokenKind::Equal
                 }
-            }
+            },
             '>' => {
                 if lexer.consume('=') {
                     TokenKind::GreaterEqual
                 } else {
                     TokenKind::Greater
                 }
-            }
+            },
             '<' => {
                 if lexer.consume('=') {
                     TokenKind::LessEqual
                 } else {
                     TokenKind::Less
                 }
-            }
+            },
             '"' => {
                 let mut backslashes = 0;
                 let mut is_terminated = false;
@@ -324,7 +324,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
 
                 value = Value::String(source[(start + 1)..(lexer.index - 1)].to_owned());
                 TokenKind::String
-            }
+            },
             'a'..='z' | 'A'..='Z' => {
                 while lexer
                     .peek()
@@ -340,7 +340,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                     value = Value::Identifier(identifier.to_owned());
                     TokenKind::Identifier
                 }
-            }
+            },
             '0'..='9' => {
                 while lexer.peek().is_some_and(|c| c.is_ascii_digit()) {
                     lexer.advance();
@@ -364,12 +364,12 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                     has_error = true;
                     continue;
                 }
-            }
+            },
             c => {
                 print_error(loc, &format!("Unknown character '{c}'"));
                 has_error = true;
                 continue;
-            }
+            },
         };
 
         tokens.push(Token {

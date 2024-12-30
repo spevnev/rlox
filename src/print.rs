@@ -7,20 +7,20 @@ fn print_expr(expr: &LocExpr) {
             print!("({:?} ", unary.op);
             print_expr(&unary.expr);
             print!(")");
-        }
+        },
         Expr::Binary(binary) => {
             print!("(");
             print_expr(&binary.left);
             print!(" {:?} ", binary.op);
             print_expr(&binary.right);
             print!(")");
-        }
+        },
         Expr::Var(var) => print!("{}", var),
         Expr::Assign(assign) => {
             print!("({} = ", assign.var);
             print_expr(&assign.expr);
             print!(")")
-        }
+        },
     };
 }
 
@@ -30,16 +30,16 @@ fn print_stmt(stmt: &Stmt) {
         Stmt::Print(expr) => {
             print!("Print ");
             print_expr(expr);
-        }
+        },
         Stmt::VarDecl(var, expr) => {
             print!("Var {} = ", var.to_identifier().unwrap());
             print_expr(expr);
-        }
+        },
         Stmt::Block(stmts) => {
             println!("{{");
             print_stmts(stmts);
             print!("}}");
-        }
+        },
     }
 }
 
