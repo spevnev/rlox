@@ -1,3 +1,5 @@
+use std::env;
+
 use crate::error::{print_error, Loc};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -289,6 +291,14 @@ pub fn get_tokens(source: &str) -> Result<Vec<Token>, ()> {
         };
 
         tokens.push(Token { kind, value, loc });
+    }
+
+    if env::var("DEBUG").is_ok_and(|value| value == "1") {
+        println!("Tokens:");
+        for token in &tokens {
+            println!("{token:?} ");
+        }
+        println!();
     }
 
     if has_error {

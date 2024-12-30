@@ -1,6 +1,9 @@
+use std::env;
+
 use crate::{
     error::{print_error, Loc},
     lexer::{Token, TokenKind, Value},
+    print,
 };
 
 pub struct Unary {
@@ -438,5 +441,17 @@ impl Parser {
 }
 
 pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, ()> {
-    Parser::new(tokens).parse()
+    if tokens.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let stmts = Parser::new(tokens).parse()?;
+
+    if env::var("DEBUG").is_ok_and(|value| value == "1") {
+        println!("Statements AST:");
+        print::print_stmts(&stmts);
+        println!();
+    }
+
+    Ok(stmts)
 }

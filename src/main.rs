@@ -5,7 +5,6 @@ use std::{
 };
 
 use interpreter::Interpreter;
-use parser::Stmt;
 
 mod error;
 mod interpreter;
@@ -13,26 +12,6 @@ mod lexer;
 mod parser;
 mod print;
 
-fn parse(source: &str) -> Result<Vec<Stmt>, ()> {
-    let tokens = lexer::get_tokens(source)?;
-    if tokens.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    println!("Tokens:");
-    for token in &tokens {
-        println!("{token:?} ");
-    }
-    println!();
-
-    let stmts = parser::parse(tokens)?;
-
-    println!("Statements AST:");
-    print::print_stmts(&stmts);
-    println!();
-
-    Ok(stmts)
-}
 
 fn run_repl() {
     let mut interpreter = Interpreter::new();
@@ -48,10 +27,17 @@ fn run_repl() {
             break;
         }
 
-        let stmts = parse(&line);
-        if stmts.is_ok() {
-            let _ = interpreter.eval(stmts.unwrap());
+        let tokens = lexer::get_tokens(&line);
+        if tokens.is_err() {
+            continue;
         }
+
+        let stmts = parser::parse(tokens.unwrap());
+        if stmts.is_err() {
+            continue;
+        }
+
+        let _ = interpreter.eval(stmts.unwrap());
     }
 }
 
@@ -61,7 +47,8 @@ fn run_file(path: &str) {
         process::exit(1);
     });
 
-    let stmts = parse(&source).unwrap_or_else(|_| process::exit(1));
+    let tokens = lexer::get_tokens(&source).unwrap_or_else(|_| process::exit(1));
+    let stmts = parser::parse(tokens).unwrap_or_else(|_| process::exit(1));
     Interpreter::new()
         .eval(stmts)
         .unwrap_or_else(|_| process::exit(1));
