@@ -1,5 +1,5 @@
 use crate::{
-    error::{error_expected, print_error, Loc},
+    error::{print_error, Loc},
     lexer::{Token, TokenKind, Value},
 };
 
@@ -83,6 +83,23 @@ pub enum Stmt {
     Expr(LocExpr),
     Print(LocExpr),
     VarDecl(Loc, String, LocExpr),
+    Block(Vec<Stmt>),
+}
+impl Token {
+    fn error_expected<T>(&self, expected: &str) -> Result<T, ()> {
+        print_error(
+            self.loc,
+            &format!("Expected {expected} but found '{:?}'", self),
+        );
+        Err(())
+    }
+
+    fn to_identifier(&self) -> Result<String, ()> {
+        match &self.value {
+            Value::Identifier(id) => Ok(id.clone()),
+            _ => self.error_expected("identifier"),
+        }
+    }
 }
 
 struct Parser {
@@ -149,11 +166,7 @@ impl Parser {
         if self.is_next(&[kind.clone()]) {
             Ok(self.advance().unwrap())
         } else {
-            error_expected(
-                &format!("{:?}", kind),
-                &self.tokens[self.index].value,
-                self.tokens[self.index].loc,
-            )
+            self.tokens[self.index].error_expected(&format!("{:?}", kind))
         }
     }
 
@@ -196,21 +209,18 @@ impl Parser {
             TokenKind::False => Ok(LocExpr::new_literal(token.loc, Value::Bool(false))),
             TokenKind::True => Ok(LocExpr::new_literal(token.loc, Value::Bool(true))),
             TokenKind::Null => Ok(LocExpr::new_literal(token.loc, Value::Null(()))),
-            TokenKind::Identifier => Ok(LocExpr::new_var(
-                token.loc,
-                token.value.to_identifier(token.loc)?,
-            )),
+            TokenKind::Identifier => Ok(LocExpr::new_var(token.loc, token.to_identifier()?)),
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
                 if self.consume(&[TokenKind::RightParen]) {
                     Ok(expr)
                 } else {
-                    print_error(token.loc, "Unclosed '('");
+                    print_error(token.loc, "Unclosed '(', expected ')'");
                     Err(())
                 }
             }
             _ => {
-                error_expected("expression", &token.value, token.loc)
+                token.error_expected("expression")
             }
         }
     }
@@ -321,7 +331,31 @@ impl Parser {
         }
     }
 
+    fn parse_block(&mut self) -> Result<Vec<Stmt>, ()> {
+        let mut stmts = Vec::new();
+
+        self.expect(TokenKind::LeftBrace)?;
+        while !self.is_done() && !self.is_next(&[TokenKind::RightBrace]) {
+            stmts.push(self.parse_decl()?);
+        }
+
+        if self.consume(&[TokenKind::RightBrace]) {
+            Ok(stmts)
+        } else {
+            assert!(self.tokens.len() > 0);
+            let loc = if self.is_done() {
+                self.tokens[self.tokens.len() - 1].loc
+            } else {
+                self.tokens[self.index].loc
+            };
+            print_error(loc, "Unclosed block('{'), expected '}'");
+            Err(())
+        }
+    }
+
     fn parse_print_stmt(&mut self) -> Result<Stmt, ()> {
+        self.expect(TokenKind::Print)?;
+
         let expr = self.parse_expr()?;
 
         if self.is_done() {
@@ -343,10 +377,10 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, ()> {
-        if self.consume(&[TokenKind::Print]) {
-            self.parse_print_stmt()
-        } else {
-            self.parse_expr_stmt()
+        match self.tokens[self.index].kind {
+            TokenKind::Print => self.parse_print_stmt(),
+            TokenKind::LeftBrace => Ok(Stmt::Block(self.parse_block()?)),
+            _ => self.parse_expr_stmt(),
         }
     }
 
@@ -360,7 +394,7 @@ impl Parser {
 
         let token = self.advance().unwrap();
         if token.kind == TokenKind::Semicolon {
-            Ok(Stmt::VarDecl(id.loc, id.value.to_identifier(id.loc)?, init))
+            Ok(Stmt::VarDecl(id.loc, id.to_identifier()?, init))
         } else {
             print_error(
                 token.loc,

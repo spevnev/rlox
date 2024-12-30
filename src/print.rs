@@ -35,10 +35,15 @@ fn print_stmt(stmt: &Stmt) {
             print!("Var {} = ", id);
             print_expr(expr);
         }
+        Stmt::Block(stmts) => {
+            println!("{{");
+            print_stmts(stmts);
+            print!("}}");
+        }
     }
 }
 
-pub fn print_ast(stmts: &Vec<Stmt>) {
+pub fn print_stmts(stmts: &Vec<Stmt>) {
     for stmt in stmts {
         print_stmt(&stmt);
         print!("\n");

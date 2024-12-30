@@ -1,12 +1,23 @@
 use std::collections::HashMap;
 
 use crate::{
-    error::{error_expected, print_error, Loc},
+    error::{print_error, Loc},
     lexer::{TokenKind, Value},
     parser::{Binary, Expr, LocExpr, Stmt, Unary},
 };
 
 impl Value {
+    fn error_expected<T>(&self, loc: Loc, expected: &str) -> Result<T, ()> {
+        print_error(
+            loc,
+            &format!(
+                "Expected {expected} but found '{}'",
+                self.convert_to_string(true)
+            ),
+        );
+        Err(())
+    }
+
     fn is_string(&self) -> bool {
         match self {
             Value::String(_) => true,
@@ -25,14 +36,7 @@ impl Value {
     fn to_number(&self, loc: Loc) -> Result<f64, ()> {
         match self {
             Value::Number(num) => Ok(num.clone()),
-            _ => error_expected("number", self, loc),
-        }
-    }
-
-    pub fn to_identifier(&self, loc: Loc) -> Result<String, ()> {
-        match self {
-            Value::Identifier(id) => Ok(id.clone()),
-            _ => error_expected("identifier", self, loc),
+            _ => self.error_expected(loc, "number"),
         }
     }
 
@@ -53,20 +57,27 @@ impl Value {
     }
 }
 
-pub struct Interpreter {
+struct Scope {
     vars: HashMap<String, Value>,
+}
+
+pub struct Interpreter {
+    scopes: Vec<Scope>,
 }
 
 impl Interpreter {
     pub fn new() -> Interpreter {
         Interpreter {
-            vars: HashMap::new(),
+            scopes: vec![Scope {
+                vars: HashMap::new(),
+            }],
         }
     }
 
     fn define_var(&mut self, loc: Loc, id: String, value: Value) -> Result<(), ()> {
-        if let None = self.vars.get(&id) {
-            self.vars.insert(id, value);
+        let scope = self.scopes.last_mut().unwrap();
+        if let None = scope.vars.get(&id) {
+            scope.vars.insert(id, value);
             Ok(())
         } else {
             print_error(loc, &format!("Redefinition of variable '{}'", id));
@@ -75,22 +86,26 @@ impl Interpreter {
     }
 
     fn set_var(&mut self, loc: Loc, id: String, value: Value) -> Result<(), ()> {
-        if let Some(var) = self.vars.get_mut(&id) {
-            *var = value;
-            Ok(())
-        } else {
-            print_error(loc, &format!("Assigning to undefined variable '{}'", id));
-            Err(())
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(var) = scope.vars.get_mut(&id) {
+                *var = value;
+                return Ok(());
+            }
         }
+
+        print_error(loc, &format!("Assigning to undefined variable '{}'", id));
+        Err(())
     }
 
     fn get_var(&self, loc: Loc, id: &str) -> Result<&Value, ()> {
-        if let Some(value) = self.vars.get(id) {
-            Ok(value)
-        } else {
-            print_error(loc, &format!("Undefined variable '{}'", id));
-            Err(())
+        for scope in self.scopes.iter().rev() {
+            if let Some(value) = scope.vars.get(id) {
+                return Ok(value);
+            }
         }
+
+        print_error(loc, &format!("Undefined variable '{}'", id));
+        Err(())
     }
 
     fn eval_unary(&mut self, unary: Unary) -> Result<Value, ()> {
@@ -181,6 +196,17 @@ impl Interpreter {
             Stmt::VarDecl(loc, id, expr) => {
                 let value = self.eval_expr(expr)?;
                 self.define_var(loc, id, value)?
+            }
+            Stmt::Block(stmts) => {
+                self.scopes.push(Scope {
+                    vars: HashMap::new(),
+                });
+
+                for stmt in stmts {
+                    self.eval_stmt(stmt)?;
+                }
+
+                self.scopes.pop();
             }
         };
 

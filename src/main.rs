@@ -28,7 +28,7 @@ fn parse(source: &str) -> Result<Vec<Stmt>, ()> {
     let stmts = parser::parse(tokens)?;
 
     println!("Statements AST:");
-    print::print_ast(&stmts);
+    print::print_stmts(&stmts);
     println!();
 
     Ok(stmts)
