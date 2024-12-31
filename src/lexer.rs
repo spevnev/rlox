@@ -22,6 +22,8 @@ pub enum TokenKind {
     GreaterEqual,
     Less,
     LessEqual,
+    AndAnd,
+    PipePipe,
 
     // Literals
     Identifier,
@@ -29,7 +31,6 @@ pub enum TokenKind {
     Number,
 
     // Keywords
-    And,
     Class,
     Else,
     False,
@@ -37,7 +38,6 @@ pub enum TokenKind {
     For,
     If,
     Null,
-    Or,
     Print,
     Return,
     Super,
@@ -69,10 +69,11 @@ impl TokenKind {
             TokenKind::GreaterEqual => ">=",
             TokenKind::Less => "<",
             TokenKind::LessEqual => "<=",
+            TokenKind::AndAnd => "&&",
+            TokenKind::PipePipe => "||",
             TokenKind::Identifier => "identifier",
             TokenKind::String => "string",
             TokenKind::Number => "number",
-            TokenKind::And => "and",
             TokenKind::Class => "class",
             TokenKind::Else => "else",
             TokenKind::False => "false",
@@ -80,7 +81,6 @@ impl TokenKind {
             TokenKind::For => "for",
             TokenKind::If => "if",
             TokenKind::Null => "null",
-            TokenKind::Or => "or",
             TokenKind::Print => "print",
             TokenKind::Return => "return",
             TokenKind::Super => "super",
@@ -93,7 +93,6 @@ impl TokenKind {
 }
 
 static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
-    "and"    => TokenKind::And,
     "class"  => TokenKind::Class,
     "else"   => TokenKind::Else,
     "false"  => TokenKind::False,
@@ -101,7 +100,6 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "fun"    => TokenKind::Fun,
     "if"     => TokenKind::If,
     "null"   => TokenKind::Null,
-    "or"     => TokenKind::Or,
     "print"  => TokenKind::Print,
     "return" => TokenKind::Return,
     "super"  => TokenKind::Super,
@@ -297,6 +295,24 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                     TokenKind::LessEqual
                 } else {
                     TokenKind::Less
+                }
+            },
+            '&' => {
+                if lexer.consume('&') {
+                    TokenKind::AndAnd
+                } else {
+                    print_error(loc, "Lox doesn't have bitwise operators");
+                    has_error = true;
+                    continue;
+                }
+            },
+            '|' => {
+                if lexer.consume('|') {
+                    TokenKind::PipePipe
+                } else {
+                    print_error(loc, "Lox doesn't have bitwise operators");
+                    has_error = true;
+                    continue;
                 }
             },
             '"' => {
