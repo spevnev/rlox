@@ -97,6 +97,7 @@ pub enum Stmt {
     VarDecl(Token, LocExpr),
     Block(Vec<Stmt>),
     If(LocExpr, Box<Stmt>, Option<Box<Stmt>>),
+    While(LocExpr, Box<Stmt>),
 }
 
 struct Parser {
@@ -395,6 +396,19 @@ impl Parser {
         Ok(Stmt::If(condition, Box::new(then_branch), else_branch))
     }
 
+    fn parse_while_stmt(&mut self) -> Result<Stmt, ()> {
+        if !self.consume(&TokenKind::LeftParen) {
+            return error(self.loc_after_prev(), "Expected '(' after 'while'");
+        }
+        let condition = self.parse_expr()?;
+        if !self.consume(&TokenKind::RightParen) {
+            return error(self.loc_after_prev(), "Unclosed '(', expected ')'");
+        }
+
+        let body = self.parse_stmt()?;
+        Ok(Stmt::While(condition, Box::new(body)))
+    }
+
     fn parse_block(&mut self) -> Result<Vec<Stmt>, ()> {
         let mut stmts = Vec::new();
 
@@ -413,6 +427,7 @@ impl Parser {
         match self.advance().unwrap().kind {
             TokenKind::Print => self.parse_print_stmt(),
             TokenKind::If => self.parse_if_stmt(),
+            TokenKind::While => self.parse_while_stmt(),
             TokenKind::LeftBrace => Ok(Stmt::Block(self.parse_block()?)),
             _ => {
                 self.back();

@@ -394,7 +394,6 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
         });
     }
 
-
     if !has_error {
         Ok(tokens)
     } else {

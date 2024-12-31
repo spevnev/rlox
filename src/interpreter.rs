@@ -86,9 +86,9 @@ impl Interpreter {
         error(loc, &format!("Undefined variable '{}'", var))
     }
 
-    fn eval_unary(&mut self, unary: Unary) -> Result<Value, ()> {
+    fn eval_unary(&mut self, unary: &Unary) -> Result<Value, ()> {
         let loc = unary.expr.loc;
-        let value = self.eval_expr(*unary.expr)?;
+        let value = self.eval_expr(&unary.expr)?;
 
         match unary.op {
             TokenKind::Minus => Ok(Value::Number(-value.to_number(loc)?)),
@@ -97,11 +97,11 @@ impl Interpreter {
         }
     }
 
-    fn eval_binary(&mut self, binary: Binary) -> Result<Value, ()> {
+    fn eval_binary(&mut self, binary: &Binary) -> Result<Value, ()> {
         let left_loc = binary.left.loc;
-        let left = self.eval_expr(*binary.left)?;
+        let left = self.eval_expr(&binary.left)?;
         let right_loc = binary.right.loc;
-        let right = self.eval_expr(*binary.right)?;
+        let right = self.eval_expr(&binary.right)?;
 
         match binary.op {
             TokenKind::EqualEqual => Ok(Value::Bool(left == right)),
@@ -147,13 +147,13 @@ impl Interpreter {
         }
     }
 
-    fn eval_logical(&mut self, binary: Binary) -> Result<Value, ()> {
-        let left = self.eval_expr(*binary.left)?;
+    fn eval_logical(&mut self, binary: &Binary) -> Result<Value, ()> {
+        let left = self.eval_expr(&binary.left)?;
 
         match binary.op {
             TokenKind::AndAnd => {
                 if left.is_truthy() {
-                    self.eval_expr(*binary.right)
+                    self.eval_expr(&binary.right)
                 } else {
                     Ok(left)
                 }
@@ -162,29 +162,29 @@ impl Interpreter {
                 if left.is_truthy() {
                     Ok(left)
                 } else {
-                    self.eval_expr(*binary.right)
+                    self.eval_expr(&binary.right)
                 }
             },
             _ => panic!("Unexpected logical operand: {:?}", binary.op),
         }
     }
 
-    fn eval_expr(&mut self, expr: LocExpr) -> Result<Value, ()> {
-        match expr.expr {
-            Expr::Literal(value) => Ok(value),
+    fn eval_expr(&mut self, expr: &LocExpr) -> Result<Value, ()> {
+        match &expr.expr {
+            Expr::Literal(value) => Ok(value.clone()),
             Expr::Unary(unary) => self.eval_unary(unary),
             Expr::Binary(binary) => self.eval_binary(binary),
             Expr::Logical(binary) => self.eval_logical(binary),
             Expr::Var(var) => Ok(self.get_var(expr.loc, &var)?.clone()),
             Expr::Assign(assign) => {
-                let value = self.eval_expr(*assign.expr)?;
+                let value = self.eval_expr(&assign.expr)?;
                 self.set_var(expr.loc, &assign.var, value.clone())?;
                 Ok(value)
             },
         }
     }
 
-    fn eval_stmt(&mut self, stmt: Stmt) -> Result<(), ()> {
+    fn eval_stmt(&mut self, stmt: &Stmt) -> Result<(), ()> {
         match stmt {
             Stmt::Expr(expr) => {
                 let _ = self.eval_expr(expr)?;
@@ -209,9 +209,14 @@ impl Interpreter {
             Stmt::If(condition, then_branch, else_branch) => {
                 let result = self.eval_expr(condition)?;
                 if result.is_truthy() {
-                    self.eval_stmt(*then_branch)?;
+                    self.eval_stmt(then_branch)?;
                 } else if else_branch.is_some() {
-                    self.eval_stmt(*else_branch.unwrap())?;
+                    self.eval_stmt(else_branch.as_ref().unwrap())?;
+                }
+            },
+            Stmt::While(condition, body) => {
+                while self.eval_expr(condition)?.is_truthy() {
+                    self.eval_stmt(body)?;
                 }
             },
         };
@@ -221,7 +226,7 @@ impl Interpreter {
 
     pub fn eval(&mut self, stmts: Vec<Stmt>) -> Result<(), ()> {
         for stmt in stmts {
-            self.eval_stmt(stmt)?;
+            self.eval_stmt(&stmt)?;
         }
 
         Ok(())
