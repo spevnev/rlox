@@ -213,6 +213,7 @@ impl Parser {
                 TokenKind::Return,
                 TokenKind::Var,
                 TokenKind::While,
+                TokenKind::LeftBrace,
             ])
         {
             self.advance();
@@ -409,6 +410,56 @@ impl Parser {
         Ok(Stmt::While(condition, Box::new(body)))
     }
 
+    fn parse_for_stmt(&mut self) -> Result<Stmt, ()> {
+        if !self.consume(&TokenKind::LeftParen) {
+            return error(self.loc_after_prev(), "Expected '(' after 'for'");
+        }
+
+        let initializer;
+        if self.consume(&TokenKind::Semicolon) {
+            initializer = None;
+        } else if self.consume(&TokenKind::Var) {
+            initializer = Some(self.parse_var_decl()?);
+        } else {
+            initializer = Some(self.parse_expr_stmt()?);
+        }
+
+        let condition;
+        if self.consume(&TokenKind::Semicolon) {
+            // `for` without condition is infinite, so use `while (true)`.
+            condition = LocExpr::new_literal((0, 0), Value::Bool(true));
+        } else {
+            condition = self.parse_expr()?;
+            self.expect(&TokenKind::Semicolon)?;
+        }
+
+        let update;
+        if self.consume(&TokenKind::RightParen) {
+            update = None;
+        } else {
+            update = Some(Stmt::Expr(self.parse_expr()?));
+            if !self.consume(&TokenKind::RightParen) {
+                return error(self.loc_after_prev(), "Unclosed '(', expected ')'");
+            }
+        }
+
+        let body = self.parse_stmt()?;
+
+        // Instead of adding a new statement kind, `for` is transformed into `while`.
+        let while_body = if update.is_some() {
+            Stmt::Block(vec![body, update.unwrap()])
+        } else {
+            body
+        };
+        let while_loop = Stmt::While(condition, Box::new(while_body));
+
+        if initializer.is_some() {
+            Ok(Stmt::Block(vec![initializer.unwrap(), while_loop]))
+        } else {
+            Ok(while_loop)
+        }
+    }
+
     fn parse_block(&mut self) -> Result<Vec<Stmt>, ()> {
         let mut stmts = Vec::new();
 
@@ -428,6 +479,7 @@ impl Parser {
             TokenKind::Print => self.parse_print_stmt(),
             TokenKind::If => self.parse_if_stmt(),
             TokenKind::While => self.parse_while_stmt(),
+            TokenKind::For => self.parse_for_stmt(),
             TokenKind::LeftBrace => Ok(Stmt::Block(self.parse_block()?)),
             _ => {
                 self.back();
