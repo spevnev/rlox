@@ -24,7 +24,7 @@ impl Value {
         }
     }
 
-    fn is_true(&self) -> bool {
+    fn is_truthy(&self) -> bool {
         match self {
             Value::Bool(bool) => *bool,
             Value::Null(()) => false,
@@ -92,7 +92,7 @@ impl Interpreter {
 
         match unary.op {
             TokenKind::Minus => Ok(Value::Number(-value.to_number(loc)?)),
-            TokenKind::Bang => Ok(Value::Bool(!value.is_true())),
+            TokenKind::Bang => Ok(Value::Bool(!value.is_truthy())),
             _ => panic!("Unexpected unary operand: {:?}", unary.op),
         }
     }
@@ -147,11 +147,34 @@ impl Interpreter {
         }
     }
 
+    fn eval_logical(&mut self, binary: Binary) -> Result<Value, ()> {
+        let left = self.eval_expr(*binary.left)?;
+
+        match binary.op {
+            TokenKind::AndAnd => {
+                if left.is_truthy() {
+                    self.eval_expr(*binary.right)
+                } else {
+                    Ok(left)
+                }
+            },
+            TokenKind::PipePipe => {
+                if left.is_truthy() {
+                    Ok(left)
+                } else {
+                    self.eval_expr(*binary.right)
+                }
+            },
+            _ => panic!("Unexpected logical operand: {:?}", binary.op),
+        }
+    }
+
     fn eval_expr(&mut self, expr: LocExpr) -> Result<Value, ()> {
         match expr.expr {
             Expr::Literal(value) => Ok(value),
             Expr::Unary(unary) => self.eval_unary(unary),
             Expr::Binary(binary) => self.eval_binary(binary),
+            Expr::Logical(binary) => self.eval_logical(binary),
             Expr::Var(var) => Ok(self.get_var(expr.loc, &var)?.clone()),
             Expr::Assign(assign) => {
                 let value = self.eval_expr(*assign.expr)?;
@@ -185,7 +208,7 @@ impl Interpreter {
             },
             Stmt::If(condition, then_branch, else_branch) => {
                 let result = self.eval_expr(condition)?;
-                if result.is_true() {
+                if result.is_truthy() {
                     self.eval_stmt(*then_branch)?;
                 } else if else_branch.is_some() {
                     self.eval_stmt(*else_branch.unwrap())?;

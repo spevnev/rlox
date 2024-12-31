@@ -23,6 +23,7 @@ pub enum Expr {
     Literal(Value),
     Unary(Unary),
     Binary(Binary),
+    Logical(Binary),
     Var(String),
     Assign(Assign),
 }
@@ -54,6 +55,17 @@ impl LocExpr {
         LocExpr {
             loc: left.loc,
             expr: Expr::Binary(Binary {
+                left: Box::new(left),
+                op: op.kind,
+                right: Box::new(right),
+            }),
+        }
+    }
+
+    fn new_logical(left: LocExpr, op: Token, right: LocExpr) -> LocExpr {
+        LocExpr {
+            loc: left.loc,
+            expr: Expr::Logical(Binary {
                 left: Box::new(left),
                 op: op.kind,
                 right: Box::new(right),
@@ -294,8 +306,32 @@ impl Parser {
         Ok(expr)
     }
 
+    fn parse_logic_and(&mut self) -> Result<LocExpr, ()> {
+        let mut expr = self.parse_equality()?;
+
+        while self.is_next(&TokenKind::AndAnd) {
+            let op = self.advance().unwrap();
+            let right = self.parse_equality()?;
+            expr = LocExpr::new_logical(expr, op, right);
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_logic_or(&mut self) -> Result<LocExpr, ()> {
+        let mut expr = self.parse_logic_and()?;
+
+        while self.is_next(&TokenKind::PipePipe) {
+            let op = self.advance().unwrap();
+            let right = self.parse_logic_and()?;
+            expr = LocExpr::new_logical(expr, op, right);
+        }
+
+        Ok(expr)
+    }
+
     fn parse_assignment(&mut self) -> Result<LocExpr, ()> {
-        let l_expr = self.parse_equality()?;
+        let l_expr = self.parse_logic_or()?;
 
         if self.consume(&TokenKind::Equal) {
             match l_expr.expr {
