@@ -10,7 +10,6 @@ mod error;
 mod interpreter;
 mod lexer;
 mod parser;
-mod print;
 
 fn run_repl() -> ExitCode {
     let mut interpreter = Interpreter::new();

@@ -1,5 +1,3 @@
-use std::env;
-
 use crate::error::{error, print_error, Loc};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -380,13 +378,6 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
         });
     }
 
-    if env::var("DEBUG").is_ok_and(|value| value == "1") {
-        println!("Tokens:");
-        for token in &tokens {
-            println!("{token:?}");
-        }
-        println!();
-    }
 
     if !has_error {
         Ok(tokens)

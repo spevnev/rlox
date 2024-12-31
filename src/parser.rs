@@ -1,9 +1,6 @@
-use std::env;
-
 use crate::{
     error::{error, Loc},
     lexer::{Token, TokenKind, Value},
-    print,
 };
 
 pub struct Unary {
@@ -400,15 +397,9 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, ()> {
         }
     }
 
-    if panic_mode {
-        return Err(());
+    if !panic_mode {
+        Ok(stmts)
+    } else {
+        Err(())
     }
-
-    if env::var("DEBUG").is_ok_and(|value| value == "1") {
-        println!("Statements AST:");
-        print::print_stmts(&stmts);
-        println!();
-    }
-
-    Ok(stmts)
 }
