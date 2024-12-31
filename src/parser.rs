@@ -84,6 +84,7 @@ pub enum Stmt {
     Print(LocExpr),
     VarDecl(Token, LocExpr),
     Block(Vec<Stmt>),
+    If(LocExpr, Box<Stmt>, Option<Box<Stmt>>),
 }
 
 struct Parser {
@@ -94,7 +95,7 @@ struct Parser {
 
 impl Parser {
     fn new(tokens: Vec<Token>) -> Parser {
-        assert!(tokens.len() > 0);
+        assert!(tokens.len() > 0, "Tokens must not be empty");
         let last = &tokens[tokens.len() - 1];
 
         Parser {
@@ -145,6 +146,12 @@ impl Parser {
         let token = self.tokens[self.index].clone();
         self.index += 1;
         Some(token)
+    }
+
+    // Un-advances to the previous token
+    fn back(&mut self) {
+        assert!(self.index > 0, "Previous token must exist");
+        self.index -= 1;
     }
 
     // Advances if the next token is of kind `kind`.
@@ -327,17 +334,34 @@ impl Parser {
     }
 
     fn parse_print_stmt(&mut self) -> Result<Stmt, ()> {
-        self.expect(&TokenKind::Print)?;
         let expr = self.parse_expr()?;
         self.expect_semicolon()?;
 
         Ok(Stmt::Print(expr))
     }
 
+    fn parse_if_stmt(&mut self) -> Result<Stmt, ()> {
+        if !self.consume(&TokenKind::LeftParen) {
+            return error(self.loc_after_prev(), "Expected '(' after 'if'");
+        }
+        let condition = self.parse_expr()?;
+        if !self.consume(&TokenKind::RightParen) {
+            return error(self.loc_after_prev(), "Unclosed '(', expected ')'");
+        }
+
+        let then_branch = self.parse_stmt()?;
+        let else_branch = if self.consume(&TokenKind::Else) {
+            Some(Box::new(self.parse_stmt()?))
+        } else {
+            None
+        };
+
+        Ok(Stmt::If(condition, Box::new(then_branch), else_branch))
+    }
+
     fn parse_block(&mut self) -> Result<Vec<Stmt>, ()> {
         let mut stmts = Vec::new();
 
-        self.expect(&TokenKind::LeftBrace)?;
         while !self.is_done() && !self.is_next(&TokenKind::RightBrace) {
             stmts.push(self.parse_decl()?);
         }
@@ -350,11 +374,14 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, ()> {
-        assert!(!self.is_done());
-        match self.tokens[self.index].kind {
+        match self.advance().unwrap().kind {
             TokenKind::Print => self.parse_print_stmt(),
+            TokenKind::If => self.parse_if_stmt(),
             TokenKind::LeftBrace => Ok(Stmt::Block(self.parse_block()?)),
-            _ => self.parse_expr_stmt(),
+            _ => {
+                self.back();
+                self.parse_expr_stmt()
+            },
         }
     }
 

@@ -183,6 +183,14 @@ impl Interpreter {
 
                 self.scopes.pop();
             },
+            Stmt::If(condition, then_branch, else_branch) => {
+                let result = self.eval_expr(condition)?;
+                if result.is_true() {
+                    self.eval_stmt(*then_branch)?;
+                } else if else_branch.is_some() {
+                    self.eval_stmt(*else_branch.unwrap())?;
+                }
+            },
         };
 
         Ok(())
