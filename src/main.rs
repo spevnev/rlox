@@ -9,6 +9,7 @@ use interpreter::Interpreter;
 mod error;
 mod interpreter;
 mod lexer;
+mod native;
 mod parser;
 
 fn run_repl() -> ExitCode {
