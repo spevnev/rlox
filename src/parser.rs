@@ -19,6 +19,11 @@ pub struct Assign {
     pub expr: Box<LocExpr>,
 }
 
+pub struct Call {
+    pub callee: Box<LocExpr>,
+    pub args: Vec<LocExpr>,
+}
+
 pub enum Expr {
     Literal(Value),
     Unary(Unary),
@@ -26,6 +31,7 @@ pub enum Expr {
     Logical(Binary),
     Var(String),
     Assign(Assign),
+    Call(Call),
 }
 
 pub struct LocExpr {
@@ -89,6 +95,16 @@ impl LocExpr {
             }),
         }
     }
+
+    fn new_call(callee: LocExpr, args: Vec<LocExpr>) -> LocExpr {
+        LocExpr {
+            loc: callee.loc,
+            expr: Expr::Call(Call {
+                callee: Box::new(callee),
+                args,
+            }),
+        }
+    }
 }
 
 pub enum Stmt {
@@ -107,6 +123,8 @@ struct Parser {
 }
 
 impl Parser {
+    const MAX_ARGS: usize = 255;
+
     fn new(tokens: Vec<Token>) -> Parser {
         assert!(tokens.len() > 0, "Tokens must not be empty");
         let last = &tokens[tokens.len() - 1];
@@ -245,13 +263,50 @@ impl Parser {
         }
     }
 
+    fn parse_args(&mut self) -> Result<Vec<LocExpr>, ()> {
+        let mut args = Vec::new();
+
+        if self.consume(&TokenKind::RightParen) {
+            return Ok(args);
+        }
+
+        args.push(self.parse_expr()?);
+        while args.len() < Self::MAX_ARGS && self.consume(&TokenKind::Comma) {
+            args.push(self.parse_expr()?);
+        }
+        if self.is_next(&TokenKind::Comma) {
+            return error(
+                self.tokens[self.index + 1].loc,
+                &format!("Max number of arguments is {}", Self::MAX_ARGS),
+            );
+        }
+        if !self.consume(&TokenKind::RightParen) {
+            return error(
+                self.loc_after_prev(),
+                "Unclosed '(', expected ')' after the arguments",
+            );
+        }
+
+        Ok(args)
+    }
+
+    fn parse_call(&mut self) -> Result<LocExpr, ()> {
+        let mut expr = self.parse_primary()?;
+
+        while self.consume(&TokenKind::LeftParen) {
+            expr = LocExpr::new_call(expr, self.parse_args()?);
+        }
+
+        Ok(expr)
+    }
+
     fn parse_unary(&mut self) -> Result<LocExpr, ()> {
         if self.are_next(&[TokenKind::Bang, TokenKind::Minus]) {
             let op = self.advance().unwrap();
             let expr = self.parse_unary()?;
             Ok(LocExpr::new_unary(op, expr))
         } else {
-            self.parse_primary()
+            self.parse_call()
         }
     }
 
@@ -384,7 +439,10 @@ impl Parser {
         }
         let condition = self.parse_expr()?;
         if !self.consume(&TokenKind::RightParen) {
-            return error(self.loc_after_prev(), "Unclosed '(', expected ')'");
+            return error(
+                self.loc_after_prev(),
+                "Unclosed '(', expected ')' after condition",
+            );
         }
 
         let then_branch = self.parse_stmt()?;
@@ -403,7 +461,10 @@ impl Parser {
         }
         let condition = self.parse_expr()?;
         if !self.consume(&TokenKind::RightParen) {
-            return error(self.loc_after_prev(), "Unclosed '(', expected ')'");
+            return error(
+                self.loc_after_prev(),
+                "Unclosed '(', expected ')' after condition",
+            );
         }
 
         let body = self.parse_stmt()?;

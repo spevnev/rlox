@@ -1,9 +1,12 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use crate::{
     error::{error, Loc},
-    lexer::{TokenKind, Value},
-    parser::{Binary, Expr, LocExpr, Stmt, Unary},
+    lexer::{Callable, TokenKind, Value},
+    parser::{Binary, Call, Expr, LocExpr, Stmt, Unary},
 };
 
 impl Value {
@@ -38,10 +41,44 @@ impl Value {
             _ => self.type_expected_error(loc, "number"),
         }
     }
+
+    fn to_callable(&self, loc: Loc) -> Result<Callable, ()> {
+        match self {
+            Value::Callable(callable) => Ok(callable.clone()),
+            // TODO: function?
+            _ => self.type_expected_error(loc, "callable"),
+        }
+    }
+}
+
+fn clock(args: Vec<Value>) -> Value {
+    assert!(args.len() == 0);
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
+    Value::Number(secs)
 }
 
 struct Scope {
-    vars: HashMap<String, Value>,
+    symbols: HashMap<String, Value>,
+}
+
+impl Scope {
+    const NATIVE_FUNCTIONS: [(&'static str, Callable); 1] =
+        [("clock", Callable { arity: 0, fun: clock })];
+
+    fn new() -> Scope {
+        Scope {
+            symbols: HashMap::new(),
+        }
+    }
+
+    fn global() -> Scope {
+        Scope {
+            symbols: HashMap::from(
+                Self::NATIVE_FUNCTIONS
+                    .map(|(name, callable)| (name.to_owned(), Value::Callable(callable))),
+            ),
+        }
+    }
 }
 
 pub struct Interpreter {
@@ -51,23 +88,33 @@ pub struct Interpreter {
 impl Interpreter {
     pub fn new() -> Interpreter {
         Interpreter {
-            scopes: vec![Scope { vars: HashMap::new() }],
+            scopes: vec![Scope::global()],
         }
     }
 
-    fn define_var(&mut self, loc: Loc, var: String, value: Value) -> Result<(), ()> {
+    fn define_symbol(&mut self, loc: Loc, var: String, value: Value) -> Result<(), ()> {
         let scope = self.scopes.last_mut().unwrap();
-        if !scope.vars.contains_key(&var) {
-            scope.vars.insert(var, value);
+        if !scope.symbols.contains_key(&var) {
+            scope.symbols.insert(var, value);
             Ok(())
         } else {
-            error(loc, &format!("Redefinition of variable '{}'", var))
+            error(loc, &format!("Redefinition of variable/function '{}'", var))
         }
+    }
+
+    fn get_symbol(&self, loc: Loc, var: &str) -> Result<&Value, ()> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(value) = scope.symbols.get(var) {
+                return Ok(value);
+            }
+        }
+
+        error(loc, &format!("Undefined variable/function '{}'", var))
     }
 
     fn set_var(&mut self, loc: Loc, var: &str, value: Value) -> Result<(), ()> {
         for scope in self.scopes.iter_mut().rev() {
-            if let Some(var) = scope.vars.get_mut(var) {
+            if let Some(var) = scope.symbols.get_mut(var) {
                 *var = value;
                 return Ok(());
             }
@@ -76,47 +123,34 @@ impl Interpreter {
         error(loc, &format!("Assigning to undefined variable '{}'", var))
     }
 
-    fn get_var(&self, loc: Loc, var: &str) -> Result<&Value, ()> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(value) = scope.vars.get(var) {
-                return Ok(value);
-            }
-        }
-
-        error(loc, &format!("Undefined variable '{}'", var))
-    }
-
     fn eval_unary(&mut self, unary: &Unary) -> Result<Value, ()> {
-        let loc = unary.expr.loc;
         let value = self.eval_expr(&unary.expr)?;
 
         match unary.op {
-            TokenKind::Minus => Ok(Value::Number(-value.to_number(loc)?)),
+            TokenKind::Minus => Ok(Value::Number(-value.to_number(unary.expr.loc)?)),
             TokenKind::Bang => Ok(Value::Bool(!value.is_truthy())),
             _ => panic!("Unexpected unary operand: {:?}", unary.op),
         }
     }
 
     fn eval_binary(&mut self, binary: &Binary) -> Result<Value, ()> {
-        let left_loc = binary.left.loc;
         let left = self.eval_expr(&binary.left)?;
-        let right_loc = binary.right.loc;
         let right = self.eval_expr(&binary.right)?;
 
         match binary.op {
             TokenKind::EqualEqual => Ok(Value::Bool(left == right)),
             TokenKind::BangEqual => Ok(Value::Bool(left != right)),
             TokenKind::Greater => Ok(Value::Bool(
-                left.to_number(left_loc)? > right.to_number(right_loc)?,
+                left.to_number(binary.left.loc)? > right.to_number(binary.right.loc)?,
             )),
             TokenKind::GreaterEqual => Ok(Value::Bool(
-                left.to_number(left_loc)? >= right.to_number(right_loc)?,
+                left.to_number(binary.left.loc)? >= right.to_number(binary.right.loc)?,
             )),
             TokenKind::Less => Ok(Value::Bool(
-                left.to_number(left_loc)? < right.to_number(right_loc)?,
+                left.to_number(binary.left.loc)? < right.to_number(binary.right.loc)?,
             )),
             TokenKind::LessEqual => Ok(Value::Bool(
-                left.to_number(left_loc)? <= right.to_number(right_loc)?,
+                left.to_number(binary.left.loc)? <= right.to_number(binary.right.loc)?,
             )),
             TokenKind::Plus => {
                 if left.is_string() || right.is_string() {
@@ -125,22 +159,22 @@ impl Interpreter {
                     ))
                 } else {
                     Ok(Value::Number(
-                        left.to_number(left_loc)? + right.to_number(right_loc)?,
+                        left.to_number(binary.left.loc)? + right.to_number(binary.right.loc)?,
                     ))
                 }
             },
             TokenKind::Minus => Ok(Value::Number(
-                left.to_number(left_loc)? - right.to_number(right_loc)?,
+                left.to_number(binary.left.loc)? - right.to_number(binary.right.loc)?,
             )),
             TokenKind::Star => Ok(Value::Number(
-                left.to_number(left_loc)? * right.to_number(right_loc)?,
+                left.to_number(binary.left.loc)? * right.to_number(binary.right.loc)?,
             )),
             TokenKind::Slash => {
-                let denom = right.to_number(right_loc)?;
+                let denom = right.to_number(binary.right.loc)?;
                 if denom == 0.0 {
-                    error(right_loc, "Division by 0")
+                    error(binary.right.loc, "Division by 0")
                 } else {
-                    Ok(Value::Number(left.to_number(left_loc)? / denom))
+                    Ok(Value::Number(left.to_number(binary.left.loc)? / denom))
                 }
             },
             _ => panic!("Unexpected binary operand: {:?}", binary.op),
@@ -169,18 +203,41 @@ impl Interpreter {
         }
     }
 
+    fn eval_call(&mut self, call: &Call) -> Result<Value, ()> {
+        let callable = self.eval_expr(&call.callee)?.to_callable(call.callee.loc)?;
+
+        if call.args.len() != usize::from(callable.arity) {
+            return error(
+                call.callee.loc,
+                &format!(
+                    "Wrong number of arguments, expected {} but got {}",
+                    callable.arity,
+                    call.args.len()
+                ),
+            );
+        }
+
+        let mut arg_values = Vec::new();
+        for arg in &call.args {
+            arg_values.push(self.eval_expr(arg)?);
+        }
+
+        Ok((callable.fun)(arg_values))
+    }
+
     fn eval_expr(&mut self, expr: &LocExpr) -> Result<Value, ()> {
         match &expr.expr {
             Expr::Literal(value) => Ok(value.clone()),
             Expr::Unary(unary) => self.eval_unary(unary),
             Expr::Binary(binary) => self.eval_binary(binary),
             Expr::Logical(binary) => self.eval_logical(binary),
-            Expr::Var(var) => Ok(self.get_var(expr.loc, &var)?.clone()),
+            Expr::Var(var) => Ok(self.get_symbol(expr.loc, &var)?.clone()),
             Expr::Assign(assign) => {
                 let value = self.eval_expr(&assign.expr)?;
                 self.set_var(expr.loc, &assign.var, value.clone())?;
                 Ok(value)
             },
+            Expr::Call(call) => self.eval_call(call),
         }
     }
 
@@ -195,10 +252,10 @@ impl Interpreter {
             },
             Stmt::VarDecl(var, expr) => {
                 let value = self.eval_expr(expr)?;
-                self.define_var(var.loc, var.to_identifier()?, value)?
+                self.define_symbol(var.loc, var.to_identifier()?, value)?
             },
             Stmt::Block(stmts) => {
-                self.scopes.push(Scope { vars: HashMap::new() });
+                self.scopes.push(Scope::new());
 
                 for stmt in stmts {
                     self.eval_stmt(stmt)?;

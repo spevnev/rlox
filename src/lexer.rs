@@ -110,12 +110,19 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
 };
 
 #[derive(PartialEq, Debug, Clone)]
+pub struct Callable {
+    pub arity: u8,
+    pub fun: fn(Vec<Value>) -> Value,
+}
+
+#[derive(PartialEq, Debug, Clone)]
 pub enum Value {
     Number(f64),
     String(String),
     Identifier(String),
     Bool(bool),
     Null(()),
+    Callable(Callable),
 }
 
 impl Value {
@@ -133,6 +140,7 @@ impl Value {
             Value::Identifier(identifier) => identifier.to_owned(),
             Value::Bool(bool) => bool.to_string(),
             Value::Null(()) => "null".to_owned(),
+            Value::Callable(_) => "callable".to_owned(), // TODO: ??? panic?
         }
     }
 }
