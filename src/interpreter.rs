@@ -51,6 +51,12 @@ impl Value {
     }
 }
 
+fn print(args: Vec<Value>) -> Value {
+    assert!(args.len() == 1);
+    println!("{}", args[0].convert_to_string(false));
+    Value::Null(())
+}
+
 fn clock(args: Vec<Value>) -> Value {
     assert!(args.len() == 0);
     let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
@@ -62,8 +68,10 @@ struct Scope {
 }
 
 impl Scope {
-    const NATIVE_FUNCTIONS: [(&'static str, Callable); 1] =
-        [("clock", Callable { arity: 0, fun: clock })];
+    const NATIVE_FUNCTIONS: [(&'static str, Callable); 2] = [
+        ("print", Callable { arity: 1, fun: print }),
+        ("clock", Callable { arity: 0, fun: clock }),
+    ];
 
     fn new() -> Scope {
         Scope {
@@ -245,10 +253,6 @@ impl Interpreter {
         match stmt {
             Stmt::Expr(expr) => {
                 let _ = self.eval_expr(expr)?;
-            },
-            Stmt::Print(expr) => {
-                let result = self.eval_expr(expr)?;
-                println!("{}", result.convert_to_string(false));
             },
             Stmt::VarDecl(var, expr) => {
                 let value = self.eval_expr(expr)?;

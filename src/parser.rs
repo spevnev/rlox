@@ -109,7 +109,6 @@ impl LocExpr {
 
 pub enum Stmt {
     Expr(LocExpr),
-    Print(LocExpr),
     VarDecl(Token, LocExpr),
     Block(Vec<Stmt>),
     If(LocExpr, Box<Stmt>, Option<Box<Stmt>>),
@@ -227,7 +226,6 @@ impl Parser {
                 TokenKind::Fun,
                 TokenKind::For,
                 TokenKind::If,
-                TokenKind::Print,
                 TokenKind::Return,
                 TokenKind::Var,
                 TokenKind::While,
@@ -426,13 +424,6 @@ impl Parser {
         Ok(Stmt::Expr(expr))
     }
 
-    fn parse_print_stmt(&mut self) -> Result<Stmt, ()> {
-        let expr = self.parse_expr()?;
-        self.expect_semicolon()?;
-
-        Ok(Stmt::Print(expr))
-    }
-
     fn parse_if_stmt(&mut self) -> Result<Stmt, ()> {
         if !self.consume(&TokenKind::LeftParen) {
             return error(self.loc_after_prev(), "Expected '(' after 'if'");
@@ -537,7 +528,6 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<Stmt, ()> {
         match self.advance().unwrap().kind {
-            TokenKind::Print => self.parse_print_stmt(),
             TokenKind::If => self.parse_if_stmt(),
             TokenKind::While => self.parse_while_stmt(),
             TokenKind::For => self.parse_for_stmt(),
