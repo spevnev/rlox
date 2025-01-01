@@ -1,6 +1,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::lexer::{Callable, Value};
+use crate::lexer::{NativeFunction, Value};
+
+pub struct NativeFunDef {
+    pub arity: usize,
+    pub fun: NativeFunction,
+}
 
 fn print(args: Vec<Value>) -> Value {
     assert!(args.len() == 1);
@@ -14,7 +19,7 @@ fn clock(args: Vec<Value>) -> Value {
     Value::Number(secs)
 }
 
-pub const NATIVE_FUNCTIONS: [(&'static str, Callable); 2] = [
-    ("print", Callable { arity: 1, fun: print }),
-    ("clock", Callable { arity: 0, fun: clock }),
+pub const NATIVE_FUNCTIONS: [(&'static str, NativeFunDef); 2] = [
+    ("print", NativeFunDef { arity: 1, fun: print }),
+    ("clock", NativeFunDef { arity: 0, fun: clock }),
 ];

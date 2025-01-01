@@ -3,27 +3,32 @@ use crate::{
     lexer::{Token, TokenKind, Value},
 };
 
+#[derive(PartialEq, Clone)]
 pub struct Unary {
     pub op: TokenKind,
     pub expr: Box<LocExpr>,
 }
 
+#[derive(PartialEq, Clone)]
 pub struct Binary {
     pub left: Box<LocExpr>,
     pub op: TokenKind,
     pub right: Box<LocExpr>,
 }
 
+#[derive(PartialEq, Clone)]
 pub struct Assign {
     pub var: String,
     pub expr: Box<LocExpr>,
 }
 
+#[derive(PartialEq, Clone)]
 pub struct Call {
     pub callee: Box<LocExpr>,
     pub args: Vec<LocExpr>,
 }
 
+#[derive(PartialEq, Clone)]
 pub enum Expr {
     Literal(Value),
     Unary(Unary),
@@ -34,6 +39,7 @@ pub enum Expr {
     Call(Call),
 }
 
+#[derive(PartialEq, Clone)]
 pub struct LocExpr {
     pub loc: Loc,
     pub expr: Expr,
@@ -107,12 +113,14 @@ impl LocExpr {
     }
 }
 
+#[derive(PartialEq, Clone)]
 pub enum Stmt {
     Expr(LocExpr),
-    VarDecl(Token, LocExpr),
     Block(Vec<Stmt>),
     If(LocExpr, Box<Stmt>, Option<Box<Stmt>>),
     While(LocExpr, Box<Stmt>),
+    VarDecl(Token, LocExpr),
+    FunDecl(Token, Vec<Token>, Vec<Stmt>),
 }
 
 struct Parser {
@@ -124,11 +132,11 @@ struct Parser {
 impl Parser {
     const MAX_ARGS: usize = 255;
 
-    fn new(tokens: Vec<Token>) -> Parser {
+    fn new(tokens: Vec<Token>) -> Self {
         assert!(tokens.len() > 0, "Tokens must not be empty");
         let last = &tokens[tokens.len() - 1];
 
-        Parser {
+        Self {
             eof_loc: (last.loc.0, last.loc.1 + last.len),
             tokens,
             index: 0,
@@ -212,7 +220,11 @@ impl Parser {
         } else {
             error(
                 self.tokens[self.index].loc,
-                &format!("Expected {}", kind.to_string()),
+                &format!(
+                    "Expected {} but found '{}'",
+                    kind.to_string(),
+                    self.tokens[self.index].value.convert_to_string(true)
+                ),
             )
         }
     }
@@ -542,20 +554,62 @@ impl Parser {
     fn parse_var_decl(&mut self) -> Result<Stmt, ()> {
         let mut init = LocExpr::new_literal((0, 0), Value::Null(()));
 
-        let var = self.expect(&TokenKind::Identifier)?;
+        let name = self.expect(&TokenKind::Identifier)?;
         if self.consume(&TokenKind::Equal) {
             init = self.parse_expr()?;
         }
         self.expect_semicolon()?;
 
-        Ok(Stmt::VarDecl(var, init))
+        Ok(Stmt::VarDecl(name, init))
+    }
+
+    fn parse_params(&mut self) -> Result<Vec<Token>, ()> {
+        let mut params = Vec::new();
+
+        if self.consume(&TokenKind::RightParen) {
+            return Ok(params);
+        }
+
+        params.push(self.expect(&TokenKind::Identifier)?);
+        while params.len() < Self::MAX_ARGS && self.consume(&TokenKind::Comma) {
+            params.push(self.expect(&TokenKind::Identifier)?);
+        }
+        if self.is_next(&TokenKind::Comma) {
+            return error(
+                self.tokens[self.index + 1].loc,
+                &format!("Max number of parameters is {}", Self::MAX_ARGS),
+            );
+        }
+        if !self.consume(&TokenKind::RightParen) {
+            return error(
+                self.loc_after_prev(),
+                "Unclosed '(', expected ')' after the parameters",
+            );
+        }
+
+        Ok(params)
+    }
+
+    fn parse_fun_decl(&mut self) -> Result<Stmt, ()> {
+        let name = self.expect(&TokenKind::Identifier)?;
+        if !self.consume(&TokenKind::LeftParen) {
+            return error(self.loc_after_prev(), "Expected '(' after 'fun'");
+        }
+        let params = self.parse_params()?;
+        self.expect(&TokenKind::LeftBrace)?;
+        let body = self.parse_block()?;
+
+        Ok(Stmt::FunDecl(name, params, body))
     }
 
     fn parse_decl(&mut self) -> Result<Stmt, ()> {
-        if self.consume(&TokenKind::Var) {
-            self.parse_var_decl()
-        } else {
-            self.parse_stmt()
+        match self.advance().unwrap().kind {
+            TokenKind::Var => self.parse_var_decl(),
+            TokenKind::Fun => self.parse_fun_decl(),
+            _ => {
+                self.back();
+                self.parse_stmt()
+            },
         }
     }
 }

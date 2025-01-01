@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     error::{error, Loc},
-    lexer::{Callable, TokenKind, Value},
+    lexer::{Callable, Function, LoxFunction, TokenKind, Value},
     native::NATIVE_FUNCTIONS,
     parser::{Binary, Call, Expr, LocExpr, Stmt, Unary},
 };
@@ -54,18 +54,24 @@ struct Scope {
 }
 
 impl Scope {
-    fn new() -> Scope {
-        Scope {
+    fn new() -> Self {
+        Self {
             symbols: HashMap::new(),
         }
     }
 
-    fn global() -> Scope {
-        Scope {
-            symbols: HashMap::from(
-                NATIVE_FUNCTIONS
-                    .map(|(name, callable)| (name.to_owned(), Value::Callable(callable))),
-            ),
+    fn global() -> Self {
+        Self {
+            symbols: HashMap::from(NATIVE_FUNCTIONS.map(|(name, fun_def)| {
+                (
+                    name.to_owned(),
+                    Value::Callable(Callable {
+                        name: name.to_owned(),
+                        arity: fun_def.arity,
+                        fun: Function::Native(fun_def.fun),
+                    }),
+                )
+            })),
         }
     }
 }
@@ -75,41 +81,44 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn new() -> Interpreter {
-        Interpreter {
+    pub fn new() -> Self {
+        Self {
             scopes: vec![Scope::global()],
         }
     }
 
-    fn define_symbol(&mut self, loc: Loc, var: String, value: Value) -> Result<(), ()> {
+    fn define_symbol(&mut self, loc: Loc, name: String, value: Value) -> Result<(), ()> {
         let scope = self.scopes.last_mut().unwrap();
-        if !scope.symbols.contains_key(&var) {
-            scope.symbols.insert(var, value);
+        if !scope.symbols.contains_key(&name) {
+            scope.symbols.insert(name, value);
             Ok(())
         } else {
-            error(loc, &format!("Redefinition of variable/function '{}'", var))
+            error(
+                loc,
+                &format!("Redefinition of variable/function '{}'", name),
+            )
         }
     }
 
-    fn get_symbol(&self, loc: Loc, var: &str) -> Result<&Value, ()> {
+    fn get_symbol(&self, loc: Loc, name: &str) -> Result<&Value, ()> {
         for scope in self.scopes.iter().rev() {
-            if let Some(value) = scope.symbols.get(var) {
+            if let Some(value) = scope.symbols.get(name) {
                 return Ok(value);
             }
         }
 
-        error(loc, &format!("Undefined variable/function '{}'", var))
+        error(loc, &format!("Undefined variable/function '{}'", name))
     }
 
-    fn set_var(&mut self, loc: Loc, var: &str, value: Value) -> Result<(), ()> {
+    fn set_var(&mut self, loc: Loc, name: &str, value: Value) -> Result<(), ()> {
         for scope in self.scopes.iter_mut().rev() {
-            if let Some(var) = scope.symbols.get_mut(var) {
+            if let Some(var) = scope.symbols.get_mut(name) {
                 *var = value;
                 return Ok(());
             }
         }
 
-        error(loc, &format!("Assigning to undefined variable '{}'", var))
+        error(loc, &format!("Assigning to undefined variable '{}'", name))
     }
 
     fn eval_unary(&mut self, unary: &Unary) -> Result<Value, ()> {
@@ -195,7 +204,7 @@ impl Interpreter {
     fn eval_call(&mut self, call: &Call) -> Result<Value, ()> {
         let callable = self.eval_expr(&call.callee)?.to_callable(call.callee.loc)?;
 
-        if call.args.len() != usize::from(callable.arity) {
+        if callable.arity != call.args.len() {
             return error(
                 call.callee.loc,
                 &format!(
@@ -211,7 +220,27 @@ impl Interpreter {
             arg_values.push(self.eval_expr(arg)?);
         }
 
-        Ok((callable.fun)(arg_values))
+        match callable.fun {
+            Function::Native(fun) => Ok(fun(arg_values)),
+            Function::Lox(fun) => {
+                let scope = Scope::new();
+                self.scopes.push(scope);
+
+                for (param, arg) in fun.params.iter().zip(call.args.iter()) {
+                    let value = self.eval_expr(arg)?;
+                    self.define_symbol(param.loc, param.to_identifier()?, value)?;
+                }
+
+                for stmt in &fun.body {
+                    self.eval_stmt(stmt)?; // TODO: pop scope even on error
+                }
+
+                let result = Value::Null(());
+
+                self.scopes.pop();
+                Ok(result)
+            },
+        }
     }
 
     fn eval_expr(&mut self, expr: &LocExpr) -> Result<Value, ()> {
@@ -235,15 +264,11 @@ impl Interpreter {
             Stmt::Expr(expr) => {
                 let _ = self.eval_expr(expr)?;
             },
-            Stmt::VarDecl(var, expr) => {
-                let value = self.eval_expr(expr)?;
-                self.define_symbol(var.loc, var.to_identifier()?, value)?
-            },
             Stmt::Block(stmts) => {
                 self.scopes.push(Scope::new());
 
                 for stmt in stmts {
-                    self.eval_stmt(stmt)?;
+                    self.eval_stmt(stmt)?; // TODO: pop scope even on error
                 }
 
                 self.scopes.pop();
@@ -260,6 +285,23 @@ impl Interpreter {
                 while self.eval_expr(condition)?.is_truthy() {
                     self.eval_stmt(body)?;
                 }
+            },
+            Stmt::VarDecl(name, init) => {
+                let value = self.eval_expr(init)?;
+                self.define_symbol(name.loc, name.to_identifier()?, value)?;
+            },
+            Stmt::FunDecl(name_token, params, body) => {
+                let name = name_token.to_identifier()?;
+                let callable = Value::Callable(Callable {
+                    name: name.clone(),
+                    arity: params.len(),
+                    fun: Function::Lox(LoxFunction {
+                        params: params.to_vec(),
+                        body: body.to_vec(),
+                    }),
+                });
+
+                self.define_symbol(name_token.loc, name, callable)?;
             },
         };
 

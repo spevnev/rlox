@@ -1,4 +1,7 @@
-use crate::error::{error, print_error, Loc};
+use crate::{
+    error::{error, print_error, Loc},
+    parser::Stmt,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
@@ -106,13 +109,28 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "while"  => TokenKind::While
 };
 
-#[derive(PartialEq, Debug, Clone)]
-pub struct Callable {
-    pub arity: u8,
-    pub fun: fn(Vec<Value>) -> Value,
+pub type NativeFunction = fn(Vec<Value>) -> Value;
+
+#[derive(PartialEq, Clone)]
+pub struct LoxFunction {
+    pub params: Vec<Token>,
+    pub body: Vec<Stmt>,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Clone)]
+pub enum Function {
+    Native(NativeFunction),
+    Lox(LoxFunction),
+}
+
+#[derive(PartialEq, Clone)]
+pub struct Callable {
+    pub name: String,
+    pub arity: usize,
+    pub fun: Function,
+}
+
+#[derive(PartialEq, Clone)]
 pub enum Value {
     Number(f64),
     String(String),
@@ -137,12 +155,12 @@ impl Value {
             Value::Identifier(identifier) => identifier.to_owned(),
             Value::Bool(bool) => bool.to_string(),
             Value::Null(()) => "null".to_owned(),
-            Value::Callable(_) => "callable".to_owned(), // TODO: ??? panic?
+            Value::Callable(callable) => format!("<fun {}>", callable.name),
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Clone)]
 pub struct Token {
     pub kind: TokenKind,
     pub value: Value,
@@ -183,8 +201,8 @@ struct Lexer {
 }
 
 impl Lexer {
-    fn new(source: &str) -> Lexer {
-        Lexer {
+    fn new(source: &str) -> Self {
+        Self {
             source: source.chars().collect(),
             index: 0,
             line_index: 0,
