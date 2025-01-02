@@ -36,7 +36,7 @@ fn run_repl() -> ExitCode {
             continue;
         };
 
-        let _ = interpreter.eval(stmts);
+        let _ = interpreter.eval(&stmts);
     }
 
     ExitCode::SUCCESS
@@ -57,7 +57,7 @@ fn run_file(path: &str) -> ExitCode {
     let Ok(stmts) = parser::parse(tokens) else {
         return ExitCode::FAILURE;
     };
-    let Ok(_) = Interpreter::new().eval(stmts) else {
+    let Ok(_) = Interpreter::new().eval(&stmts) else {
         return ExitCode::FAILURE;
     };
 

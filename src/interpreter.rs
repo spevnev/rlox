@@ -44,16 +44,16 @@ impl Value {
         }
     }
 
-    fn to_number(&self, loc: Loc) -> Result<f64> {
+    fn to_number(&self, loc: Loc) -> Result<&f64> {
         match self {
-            Value::Number(num) => Ok(*num),
+            Value::Number(num) => Ok(num),
             _ => self.type_expected_error(loc, "number"),
         }
     }
 
-    fn to_callable(&self, loc: Loc) -> Result<Callable> {
+    fn to_callable(&self, loc: Loc) -> Result<&Callable> {
         match self {
-            Value::Callable(callable) => Ok(callable.clone()),
+            Value::Callable(callable) => Ok(callable),
             _ => self.type_expected_error(loc, "function or constructor"),
         }
     }
@@ -135,7 +135,7 @@ impl Interpreter {
         let value = self.eval_expr(&unary.expr)?;
 
         match unary.op {
-            TokenKind::Minus => Ok(Value::Number(-value.to_number(unary.expr.loc)?)),
+            TokenKind::Minus => Ok(Value::Number(-1.0 * value.to_number(unary.expr.loc)?.clone())),
             TokenKind::Bang => Ok(Value::Bool(!value.is_truthy())),
             _ => panic!("Unexpected unary operand: {:?}", unary.op),
         }
@@ -179,7 +179,7 @@ impl Interpreter {
             )),
             TokenKind::Slash => {
                 let denom = right.to_number(binary.right.loc)?;
-                if denom == 0.0 {
+                if *denom == 0.0 {
                     print_error(binary.right.loc, "Division by 0");
                     Err(Error::DivisionByZero)
                 } else {
@@ -213,7 +213,8 @@ impl Interpreter {
     }
 
     fn eval_call(&mut self, call: &Call) -> Result<Value> {
-        let callable = self.eval_expr(&call.callee)?.to_callable(call.callee.loc)?;
+        let value = self.eval_expr(&call.callee)?;
+        let callable = value.to_callable(call.callee.loc)?;
 
         if callable.arity != call.args.len() {
             print_error(
@@ -232,7 +233,7 @@ impl Interpreter {
             arg_values.push(self.eval_expr(arg)?);
         }
 
-        match callable.fun {
+        match &callable.fun {
             Function::Native(fun) => Ok(fun(arg_values)),
             Function::Lox(params, body) => {
                 let scope = Scope::new();
@@ -315,10 +316,7 @@ impl Interpreter {
                 let callable = Value::Callable(Callable {
                     name: name.clone(),
                     arity: params.len(),
-                    fun: Function::Lox(
-                        params.clone(),
-                        body.clone(),
-                    ),
+                    fun: Function::Lox(params.clone(), body.clone()),
                 });
 
                 self.define_symbol(name_token.loc, name, callable)?;
@@ -332,9 +330,9 @@ impl Interpreter {
         Ok(())
     }
 
-    pub fn eval(&mut self, stmts: Vec<Stmt>) -> Result<()> {
+    pub fn eval(&mut self, stmts: &Vec<Stmt>) -> Result<()> {
         for stmt in stmts {
-            self.eval_stmt(&stmt)?;
+            self.eval_stmt(stmt)?;
         }
 
         Ok(())

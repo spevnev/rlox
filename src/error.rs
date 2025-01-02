@@ -1,4 +1,4 @@
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Loc {
     pub line: usize,
     pub column: usize,
