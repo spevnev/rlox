@@ -5,32 +5,27 @@ use crate::{
     lexer::{LoxFunction, Token, TokenKind, Value},
 };
 
-#[derive(PartialEq)]
 pub struct Unary {
     pub op: TokenKind,
     pub expr: Box<LocExpr>,
 }
 
-#[derive(PartialEq)]
 pub struct Binary {
     pub left: Box<LocExpr>,
     pub op: TokenKind,
     pub right: Box<LocExpr>,
 }
 
-#[derive(PartialEq)]
 pub struct Assign {
     pub var: String,
     pub expr: Box<LocExpr>,
 }
 
-#[derive(PartialEq)]
 pub struct Call {
     pub callee: Box<LocExpr>,
     pub args: Vec<LocExpr>,
 }
 
-#[derive(PartialEq)]
 pub enum Expr {
     Literal(Value),
     Unary(Unary),
@@ -41,7 +36,6 @@ pub enum Expr {
     Call(Call),
 }
 
-#[derive(PartialEq)]
 pub struct LocExpr {
     pub loc: Loc,
     pub expr: Expr,
@@ -123,7 +117,6 @@ impl LocExpr {
     }
 }
 
-#[derive(PartialEq)]
 pub enum Stmt {
     Expr(LocExpr),
     Block(Vec<Stmt>),

@@ -113,17 +113,25 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
 
 pub type NativeFunction = fn(Vec<Value>) -> Value;
 
-#[derive(PartialEq)]
 pub struct LoxFunction {
     pub params: Vec<Token>,
     pub body: Vec<Stmt>,
 }
 
-#[derive(PartialEq)]
 pub enum Function {
     Native(NativeFunction),
     /// params, body
     Lox(Rc<LoxFunction>),
+}
+
+impl PartialEq for Function {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Native(this), Self::Native(other)) => this == other,
+            (Self::Lox(this), Self::Lox(other)) => Rc::ptr_eq(this, other),
+            _ => false,
+        }
+    }
 }
 
 #[derive(PartialEq)]
