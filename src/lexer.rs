@@ -112,21 +112,15 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
 pub type NativeFunction = fn(Vec<Value>) -> Value;
 
 #[derive(PartialEq, Clone)]
-pub struct LoxFunction {
-    pub params: Vec<Token>,
-    pub body: Vec<Stmt>,
-}
-
-#[derive(PartialEq, Clone)]
 pub enum Function {
     Native(NativeFunction),
-    Lox(LoxFunction),
+    Lox(Vec<Token>, Vec<Stmt>), // params, body
 }
 
 #[derive(PartialEq, Clone)]
 pub struct Callable {
     pub name: String,
-    pub arity: usize,
+    pub arity: usize, // number of arguments
     pub fun: Function,
 }
 

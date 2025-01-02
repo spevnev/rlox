@@ -1,17 +1,32 @@
 use std::collections::HashMap;
 
 use crate::{
-    error::{error, Loc},
-    lexer::{Callable, Function, LoxFunction, TokenKind, Value},
+    error::{print_error, Loc},
+    lexer::{Callable, Function, TokenKind, Value},
     native::NATIVE_FUNCTIONS,
     parser::{Binary, Call, Expr, LocExpr, Stmt, Unary},
 };
 
+pub enum Error {
+    MismatchingType,
+    SymbolRedefinition,
+    UndefinedSymbol,
+    DivisionByZero,
+    WrongArity,
+
+    // The following aren't actual errors, and are used to quickly return from a deeply nested call:
+    Return(Value),
+}
+
+type Result<V, E = Error> = std::result::Result<V, E>;
+
 impl Value {
-    fn type_expected_error<T>(&self, loc: Loc, expected: &str) -> Result<T, ()> {
-        error(
+    fn type_expected_error<T>(&self, loc: Loc, expected: &str) -> Result<T> {
+        print_error(
             loc,
             &format!("Expected {expected} but found '{}'", self.convert_to_string(true)),
+        );
+        Err(Error::MismatchingType)
     }
 
     fn is_string(&self) -> bool {
@@ -29,14 +44,14 @@ impl Value {
         }
     }
 
-    fn to_number(&self, loc: Loc) -> Result<f64, ()> {
+    fn to_number(&self, loc: Loc) -> Result<f64> {
         match self {
             Value::Number(num) => Ok(*num),
             _ => self.type_expected_error(loc, "number"),
         }
     }
 
-    fn to_callable(&self, loc: Loc) -> Result<Callable, ()> {
+    fn to_callable(&self, loc: Loc) -> Result<Callable> {
         match self {
             Value::Callable(callable) => Ok(callable.clone()),
             _ => self.type_expected_error(loc, "callable(function/constructor)"),
@@ -82,30 +97,29 @@ impl Interpreter {
         }
     }
 
-    fn define_symbol(&mut self, loc: Loc, name: String, value: Value) -> Result<(), ()> {
+    fn define_symbol(&mut self, loc: Loc, name: String, value: Value) -> Result<()> {
         let scope = self.scopes.last_mut().expect("Interpreter must have a global scope.");
         if !scope.symbols.contains_key(&name) {
             scope.symbols.insert(name, value);
             Ok(())
         } else {
-            error(
-                loc,
-                &format!("Redefinition of variable/function '{}'", name),
-            )
+            print_error(loc, &format!("Redefinition of symbol '{}'", name));
+            Err(Error::SymbolRedefinition)
         }
     }
 
-    fn get_symbol(&self, loc: Loc, name: &str) -> Result<&Value, ()> {
+    fn get_symbol(&self, loc: Loc, name: &str) -> Result<&Value> {
         for scope in self.scopes.iter().rev() {
             if let Some(value) = scope.symbols.get(name) {
                 return Ok(value);
             }
         }
 
-        error(loc, &format!("Undefined variable/function '{}'", name))
+        print_error(loc, &format!("Undefined symbol '{}'", name));
+        Err(Error::UndefinedSymbol)
     }
 
-    fn set_var(&mut self, loc: Loc, name: &str, value: Value) -> Result<(), ()> {
+    fn set_var(&mut self, loc: Loc, name: &str, value: Value) -> Result<()> {
         for scope in self.scopes.iter_mut().rev() {
             if let Some(var) = scope.symbols.get_mut(name) {
                 *var = value;
@@ -113,10 +127,11 @@ impl Interpreter {
             }
         }
 
-        error(loc, &format!("Assigning to undefined variable '{}'", name))
+        print_error(loc, &format!("Assigning to undefined variable '{}'", name));
+        Err(Error::UndefinedSymbol)
     }
 
-    fn eval_unary(&mut self, unary: &Unary) -> Result<Value, ()> {
+    fn eval_unary(&mut self, unary: &Unary) -> Result<Value> {
         let value = self.eval_expr(&unary.expr)?;
 
         match unary.op {
@@ -126,7 +141,7 @@ impl Interpreter {
         }
     }
 
-    fn eval_binary(&mut self, binary: &Binary) -> Result<Value, ()> {
+    fn eval_binary(&mut self, binary: &Binary) -> Result<Value> {
         let left = self.eval_expr(&binary.left)?;
         let right = self.eval_expr(&binary.right)?;
 
@@ -165,7 +180,8 @@ impl Interpreter {
             TokenKind::Slash => {
                 let denom = right.to_number(binary.right.loc)?;
                 if denom == 0.0 {
-                    error(binary.right.loc, "Division by 0")
+                    print_error(binary.right.loc, "Division by 0");
+                    Err(Error::DivisionByZero)
                 } else {
                     Ok(Value::Number(left.to_number(binary.left.loc)? / denom))
                 }
@@ -174,7 +190,7 @@ impl Interpreter {
         }
     }
 
-    fn eval_logical(&mut self, binary: &Binary) -> Result<Value, ()> {
+    fn eval_logical(&mut self, binary: &Binary) -> Result<Value> {
         let left = self.eval_expr(&binary.left)?;
 
         match binary.op {
@@ -196,11 +212,11 @@ impl Interpreter {
         }
     }
 
-    fn eval_call(&mut self, call: &Call) -> Result<Value, ()> {
+    fn eval_call(&mut self, call: &Call) -> Result<Value> {
         let callable = self.eval_expr(&call.callee)?.to_callable(call.callee.loc)?;
 
         if callable.arity != call.args.len() {
-            return error(
+            print_error(
                 call.callee.loc,
                 &format!(
                     "Wrong number of arguments, expected {} but got {}",
@@ -208,6 +224,7 @@ impl Interpreter {
                     call.args.len()
                 ),
             );
+            return Err(Error::WrongArity);
         }
 
         let mut arg_values = Vec::new();
@@ -217,7 +234,7 @@ impl Interpreter {
 
         match callable.fun {
             Function::Native(fun) => Ok(fun(arg_values)),
-            Function::Lox(fun) => {
+            Function::Lox(params, body) => {
                 let scope = Scope::new();
                 self.scopes.push(scope);
 
@@ -242,7 +259,7 @@ impl Interpreter {
         }
     }
 
-    fn eval_expr(&mut self, expr: &LocExpr) -> Result<Value, ()> {
+    fn eval_expr(&mut self, expr: &LocExpr) -> Result<Value> {
         match &expr.expr {
             Expr::Literal(value) => Ok(value.clone()),
             Expr::Unary(unary) => self.eval_unary(unary),
@@ -258,7 +275,7 @@ impl Interpreter {
         }
     }
 
-    fn eval_stmt(&mut self, stmt: &Stmt) -> Result<(), ()> {
+    fn eval_stmt(&mut self, stmt: &Stmt) -> Result<()> {
         match stmt {
             Stmt::Expr(expr) => {
                 let _ = self.eval_expr(expr)?;
@@ -298,20 +315,24 @@ impl Interpreter {
                 let callable = Value::Callable(Callable {
                     name: name.clone(),
                     arity: params.len(),
-                    fun: Function::Lox(LoxFunction {
-                        params: params.to_vec(),
-                        body: body.to_vec(),
-                    }),
+                    fun: Function::Lox(
+                        params.clone(),
+                        body.clone(),
+                    ),
                 });
 
                 self.define_symbol(name_token.loc, name, callable)?;
+            },
+            Stmt::Return(expr) => {
+                let value = self.eval_expr(expr)?;
+                return Err(Error::Return(value));
             },
         };
 
         Ok(())
     }
 
-    pub fn eval(&mut self, stmts: Vec<Stmt>) -> Result<(), ()> {
+    pub fn eval(&mut self, stmts: Vec<Stmt>) -> Result<()> {
         for stmt in stmts {
             self.eval_stmt(&stmt)?;
         }

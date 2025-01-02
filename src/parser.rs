@@ -121,6 +121,7 @@ pub enum Stmt {
     While(LocExpr, Box<Stmt>),                 // condition, body
     VarDecl(Token, LocExpr),                   // name, init
     FunDecl(Token, Vec<Token>, Vec<Stmt>),     // name, params, body
+    Return(LocExpr),
 }
 
 struct Parser {
@@ -517,6 +518,18 @@ impl Parser {
         }
     }
 
+    fn parse_return_stmt(&mut self) -> Result<Stmt, ()> {
+        let value;
+        if self.consume(&TokenKind::Semicolon) {
+            value = LocExpr::new_literal(self.tokens[self.index - 1].loc, Value::Null);
+        } else {
+            value = self.parse_expr()?;
+            self.expect_semicolon()?;
+        }
+
+        Ok(Stmt::Return(value))
+    }
+
     fn parse_block(&mut self) -> Result<Vec<Stmt>, ()> {
         let mut stmts = Vec::new();
 
@@ -536,6 +549,7 @@ impl Parser {
             TokenKind::If => self.parse_if_stmt(),
             TokenKind::While => self.parse_while_stmt(),
             TokenKind::For => self.parse_for_stmt(),
+            TokenKind::Return => self.parse_return_stmt(),
             TokenKind::LeftBrace => Ok(Stmt::Block(self.parse_block()?)),
             _ => {
                 self.back();
