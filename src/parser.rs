@@ -1,34 +1,36 @@
+use std::rc::Rc;
+
 use crate::{
     error::{error, print_error, Loc},
-    lexer::{Token, TokenKind, Value},
+    lexer::{LoxFunction, Token, TokenKind, Value},
 };
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq)]
 pub struct Unary {
     pub op: TokenKind,
     pub expr: Box<LocExpr>,
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq)]
 pub struct Binary {
     pub left: Box<LocExpr>,
     pub op: TokenKind,
     pub right: Box<LocExpr>,
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq)]
 pub struct Assign {
     pub var: String,
     pub expr: Box<LocExpr>,
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq)]
 pub struct Call {
     pub callee: Box<LocExpr>,
     pub args: Vec<LocExpr>,
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq)]
 pub enum Expr {
     Literal(Value),
     Unary(Unary),
@@ -39,7 +41,7 @@ pub enum Expr {
     Call(Call),
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq)]
 pub struct LocExpr {
     pub loc: Loc,
     pub expr: Expr,
@@ -121,7 +123,7 @@ impl LocExpr {
     }
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq)]
 pub enum Stmt {
     Expr(LocExpr),
     Block(Vec<Stmt>),
@@ -131,8 +133,8 @@ pub enum Stmt {
     While(LocExpr, Box<Stmt>),
     /// name, init
     VarDecl(Token, LocExpr),
-    /// name, params, body
-    FunDecl(Token, Vec<Token>, Vec<Stmt>),
+    /// name, function
+    FunDecl(Token, Rc<LoxFunction>),
     Return(LocExpr),
 }
 
@@ -615,7 +617,7 @@ impl Parser {
         self.expect(&TokenKind::LeftBrace, "Expected '{' after function parameters")?;
         let body = self.parse_block()?;
 
-        Ok(Stmt::FunDecl(name, params, body))
+        Ok(Stmt::FunDecl(name, Rc::new(LoxFunction { params, body })))
     }
 
     fn parse_decl(&mut self) -> Option<Stmt> {

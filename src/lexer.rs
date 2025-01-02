@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::{
     error::{error, print_error, Loc},
     parser::Stmt,
@@ -111,14 +113,20 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
 
 pub type NativeFunction = fn(Vec<Value>) -> Value;
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq)]
+pub struct LoxFunction {
+    pub params: Vec<Token>,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(PartialEq)]
 pub enum Function {
     Native(NativeFunction),
     /// params, body
-    Lox(Vec<Token>, Vec<Stmt>),
+    Lox(Rc<LoxFunction>),
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq)]
 pub struct Callable {
     pub name: String,
     /// number of arguments
@@ -133,7 +141,7 @@ pub enum Value {
     Identifier(String),
     Bool(bool),
     Null,
-    Callable(Callable),
+    Callable(Rc<Callable>),
 }
 
 impl Value {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 use crate::{
     error::{print_error, Loc},
@@ -75,11 +75,11 @@ impl Scope {
             symbols: HashMap::from(NATIVE_FUNCTIONS.map(|(name, arity, function)| {
                 (
                     name.to_owned(),
-                    Value::Callable(Callable {
+                    Value::Callable(Rc::new(Callable {
                         name: name.to_owned(),
                         arity,
                         fun: Function::Native(function),
-                    }),
+                    })),
                 )
             })),
         }
@@ -235,18 +235,18 @@ impl Interpreter {
 
         match &callable.fun {
             Function::Native(fun) => Ok(fun(arg_values)),
-            Function::Lox(params, body) => {
+            Function::Lox(function) => {
                 let scope = Scope::new();
                 self.scopes.push(scope);
 
-                assert!(params.len() == call.args.len());
-                for (param_token, arg) in params.iter().zip(call.args.iter()) {
+                assert!(function.params.len() == call.args.len());
+                for (param_token, arg) in function.params.iter().zip(call.args.iter()) {
                     let value = self.eval_expr(arg)?;
                     let param = param_token.to_identifier().expect("Parameter name must be an identifier.");
                     self.define_symbol(param_token.loc, param, value)?;
                 }
 
-                let result = match self.eval(body) {
+                let result = match self.eval(&function.body) {
                     Ok(_) => Value::Null,
                     Err(err) => match err {
                         Error::Return(value) => value,
@@ -311,13 +311,13 @@ impl Interpreter {
                 let value = self.eval_expr(init)?;
                 self.define_symbol(name_token.loc, name, value)?;
             },
-            Stmt::FunDecl(name_token, params, body) => {
+            Stmt::FunDecl(name_token, function) => {
                 let name = name_token.to_identifier().expect("Function name must be an identifier.");
-                let callable = Value::Callable(Callable {
+                let callable = Value::Callable(Rc::new(Callable {
                     name: name.clone(),
-                    arity: params.len(),
-                    fun: Function::Lox(params.clone(), body.clone()),
-                });
+                    arity: function.params.len(),
+                    fun: Function::Lox(function.clone()),
+                }));
 
                 self.define_symbol(name_token.loc, name, callable)?;
             },
