@@ -10,7 +10,7 @@ pub struct NativeFunDef {
 fn print(args: Vec<Value>) -> Value {
     assert!(args.len() == 1);
     println!("{}", args[0].convert_to_string(false));
-    Value::Null(())
+    Value::Null
 }
 
 fn clock(args: Vec<Value>) -> Value {

@@ -11,11 +11,7 @@ impl Value {
     fn type_expected_error<T>(&self, loc: Loc, expected: &str) -> Result<T, ()> {
         error(
             loc,
-            &format!(
-                "Expected {expected} but found '{}'",
-                self.convert_to_string(true)
-            ),
-        )
+            &format!("Expected {expected} but found '{}'", self.convert_to_string(true)),
     }
 
     fn is_string(&self) -> bool {
@@ -28,7 +24,7 @@ impl Value {
     fn is_truthy(&self) -> bool {
         match self {
             Value::Bool(bool) => *bool,
-            Value::Null(()) => false,
+            Value::Null => false,
             _ => true,
         }
     }
@@ -43,8 +39,7 @@ impl Value {
     fn to_callable(&self, loc: Loc) -> Result<Callable, ()> {
         match self {
             Value::Callable(callable) => Ok(callable.clone()),
-            // TODO: function?
-            _ => self.type_expected_error(loc, "callable"),
+            _ => self.type_expected_error(loc, "callable(function/constructor)"),
         }
     }
 }
@@ -88,7 +83,7 @@ impl Interpreter {
     }
 
     fn define_symbol(&mut self, loc: Loc, name: String, value: Value) -> Result<(), ()> {
-        let scope = self.scopes.last_mut().unwrap();
+        let scope = self.scopes.last_mut().expect("Interpreter must have a global scope.");
         if !scope.symbols.contains_key(&name) {
             scope.symbols.insert(name, value);
             Ok(())
@@ -226,16 +221,20 @@ impl Interpreter {
                 let scope = Scope::new();
                 self.scopes.push(scope);
 
-                for (param, arg) in fun.params.iter().zip(call.args.iter()) {
+                assert!(params.len() == call.args.len());
+                for (param_token, arg) in params.iter().zip(call.args.iter()) {
                     let value = self.eval_expr(arg)?;
-                    self.define_symbol(param.loc, param.to_identifier()?, value)?;
+                    let param = param_token.to_identifier().expect("Parameter name must be an identifier.");
+                    self.define_symbol(param_token.loc, param, value)?;
                 }
 
-                for stmt in &fun.body {
-                    self.eval_stmt(stmt)?; // TODO: pop scope even on error
-                }
-
-                let result = Value::Null(());
+                let result = match self.eval(body) {
+                    Ok(_) => Value::Null,
+                    Err(err) => match err {
+                        Error::Return(value) => value,
+                        _ => return Err(err),
+                    },
+                };
 
                 self.scopes.pop();
                 Ok(result)
@@ -268,7 +267,10 @@ impl Interpreter {
                 self.scopes.push(Scope::new());
 
                 for stmt in stmts {
-                    self.eval_stmt(stmt)?; // TODO: pop scope even on error
+                    self.eval_stmt(stmt).inspect_err(|_| {
+                        // Pop the scope on error and propagate it
+                        let _ = self.scopes.pop();
+                    })?;
                 }
 
                 self.scopes.pop();
@@ -286,12 +288,13 @@ impl Interpreter {
                     self.eval_stmt(body)?;
                 }
             },
-            Stmt::VarDecl(name, init) => {
+            Stmt::VarDecl(name_token, init) => {
+                let name = name_token.to_identifier().expect("Variable name must be an identifier.");
                 let value = self.eval_expr(init)?;
-                self.define_symbol(name.loc, name.to_identifier()?, value)?;
+                self.define_symbol(name_token.loc, name, value)?;
             },
             Stmt::FunDecl(name_token, params, body) => {
-                let name = name_token.to_identifier()?;
+                let name = name_token.to_identifier().expect("Function name must be an identifier.");
                 let callable = Value::Callable(Callable {
                     name: name.clone(),
                     arity: params.len(),

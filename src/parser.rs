@@ -117,10 +117,10 @@ impl LocExpr {
 pub enum Stmt {
     Expr(LocExpr),
     Block(Vec<Stmt>),
-    If(LocExpr, Box<Stmt>, Option<Box<Stmt>>),
-    While(LocExpr, Box<Stmt>),
-    VarDecl(Token, LocExpr),
-    FunDecl(Token, Vec<Token>, Vec<Stmt>),
+    If(LocExpr, Box<Stmt>, Option<Box<Stmt>>), // condition, then, else
+    While(LocExpr, Box<Stmt>),                 // condition, body
+    VarDecl(Token, LocExpr),                   // name, init
+    FunDecl(Token, Vec<Token>, Vec<Stmt>),     // name, params, body
 }
 
 struct Parser {
@@ -134,10 +134,13 @@ impl Parser {
 
     fn new(tokens: Vec<Token>) -> Self {
         assert!(tokens.len() > 0, "Tokens must not be empty");
-        let last = &tokens[tokens.len() - 1];
+        let prev = &tokens[tokens.len() - 1];
+
+        let mut eof_loc = prev.loc;
+        eof_loc.column += prev.len;
 
         Self {
-            eof_loc: (last.loc.0, last.loc.1 + last.len),
+            eof_loc,
             tokens,
             index: 0,
         }
@@ -149,8 +152,12 @@ impl Parser {
             self.eof_loc
         } else {
             assert!(self.index > 0, "Previous token must exist");
-            let cur = &self.tokens[self.index - 1];
-            (cur.loc.0, cur.loc.1 + cur.len)
+            let prev = &self.tokens[self.index - 1];
+
+            let mut loc = prev.loc;
+            loc.column += prev.len;
+
+            loc
         }
     }
 
@@ -254,12 +261,10 @@ impl Parser {
         };
 
         match token.kind {
-            TokenKind::Number | TokenKind::String => {
-                Ok(LocExpr::new_literal(token.loc, token.value))
-            },
+            TokenKind::Number | TokenKind::String => Ok(LocExpr::new_literal(token.loc, token.value)),
             TokenKind::False => Ok(LocExpr::new_literal(token.loc, Value::Bool(false))),
             TokenKind::True => Ok(LocExpr::new_literal(token.loc, Value::Bool(true))),
-            TokenKind::Null => Ok(LocExpr::new_literal(token.loc, Value::Null(()))),
+            TokenKind::Null => Ok(LocExpr::new_literal(token.loc, Value::Null)),
             TokenKind::Identifier => Ok(LocExpr::new_var(token.loc, token.to_identifier()?)),
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
@@ -291,10 +296,7 @@ impl Parser {
             );
         }
         if !self.consume(&TokenKind::RightParen) {
-            return error(
-                self.loc_after_prev(),
-                "Unclosed '(', expected ')' after the arguments",
-            );
+            return error(self.loc_after_prev(), "Unclosed '(', expected ')' after the arguments");
         }
 
         Ok(args)
@@ -422,10 +424,7 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            error(
-                self.loc_after_prev(),
-                "Expected semicolon after the statement",
-            )
+            error(self.loc_after_prev(), "Expected semicolon after the statement")
         }
     }
 
@@ -442,10 +441,7 @@ impl Parser {
         }
         let condition = self.parse_expr()?;
         if !self.consume(&TokenKind::RightParen) {
-            return error(
-                self.loc_after_prev(),
-                "Unclosed '(', expected ')' after condition",
-            );
+            return error(self.loc_after_prev(), "Unclosed '(', expected ')' after condition");
         }
 
         let then_branch = self.parse_stmt()?;
@@ -464,10 +460,7 @@ impl Parser {
         }
         let condition = self.parse_expr()?;
         if !self.consume(&TokenKind::RightParen) {
-            return error(
-                self.loc_after_prev(),
-                "Unclosed '(', expected ')' after condition",
-            );
+            return error(self.loc_after_prev(), "Unclosed '(', expected ')' after condition");
         }
 
         let body = self.parse_stmt()?;
@@ -491,7 +484,7 @@ impl Parser {
         let condition;
         if self.consume(&TokenKind::Semicolon) {
             // `for` without condition is infinite, so use `while (true)`.
-            condition = LocExpr::new_literal((0, 0), Value::Bool(true));
+            condition = LocExpr::new_literal(Loc::none(), Value::Bool(true));
         } else {
             condition = self.parse_expr()?;
             self.expect(&TokenKind::Semicolon)?;
@@ -552,7 +545,7 @@ impl Parser {
     }
 
     fn parse_var_decl(&mut self) -> Result<Stmt, ()> {
-        let mut init = LocExpr::new_literal((0, 0), Value::Null(()));
+        let mut init = LocExpr::new_literal(Loc::none(), Value::Null);
 
         let name = self.expect(&TokenKind::Identifier)?;
         if self.consume(&TokenKind::Equal) {
@@ -581,10 +574,7 @@ impl Parser {
             );
         }
         if !self.consume(&TokenKind::RightParen) {
-            return error(
-                self.loc_after_prev(),
-                "Unclosed '(', expected ')' after the parameters",
-            );
+            return error(self.loc_after_prev(), "Unclosed '(', expected ')' after the parameters");
         }
 
         Ok(params)

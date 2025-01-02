@@ -136,7 +136,7 @@ pub enum Value {
     String(String),
     Identifier(String),
     Bool(bool),
-    Null(()),
+    Null,
     Callable(Callable),
 }
 
@@ -149,12 +149,12 @@ impl Value {
                 if quote_string {
                     format!("\"{string}\"")
                 } else {
-                    string.to_owned()
+                    string.clone()
                 }
             },
-            Value::Identifier(identifier) => identifier.to_owned(),
+            Value::Identifier(identifier) => identifier.clone(),
             Value::Bool(bool) => bool.to_string(),
-            Value::Null(()) => "null".to_owned(),
+            Value::Null => "null".to_owned(),
             Value::Callable(callable) => format!("<fun {}>", callable.name),
         }
     }
@@ -171,9 +171,7 @@ pub struct Token {
 impl Token {
     fn to_error_string(&self) -> String {
         match self.kind {
-            TokenKind::Number | TokenKind::String | TokenKind::Identifier => {
-                self.value.convert_to_string(true)
-            },
+            TokenKind::Number | TokenKind::String | TokenKind::Identifier => self.value.convert_to_string(true),
             _ => self.kind.to_string().to_owned(),
         }
     }
@@ -187,7 +185,7 @@ impl Token {
 
     pub fn to_identifier(&self) -> Result<String, ()> {
         match &self.value {
-            Value::Identifier(id) => Ok(id.to_owned()),
+            Value::Identifier(id) => Ok(id.clone()),
             _ => self.type_expected_error("identifier"),
         }
     }
@@ -211,7 +209,10 @@ impl Lexer {
     }
 
     fn current_loc(&self) -> Loc {
-        (self.line, self.index - self.line_index + 1)
+        Loc {
+            line: self.line,
+            column: self.index - self.line_index + 1,
+        }
     }
 
     fn is_done(&self) -> bool {
@@ -262,7 +263,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
         let start = lexer.index;
         let loc = lexer.current_loc();
 
-        let mut value = Value::Null(());
+        let mut value = Value::Null;
         let kind = match lexer.advance().unwrap() {
             ' ' | '\r' | '\t' => continue,
             '\n' => {
@@ -363,10 +364,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                 TokenKind::String
             },
             'a'..='z' | 'A'..='Z' => {
-                while lexer
-                    .peek()
-                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-                {
+                while lexer.peek().is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
                     lexer.advance();
                 }
 
