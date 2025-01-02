@@ -27,18 +27,16 @@ fn run_repl() -> ExitCode {
             break;
         }
 
-        let tokens = lexer::tokenize(&line);
-        if tokens.is_err() {
+        let Ok(tokens) = lexer::tokenize(&line) else {
             continue;
-        }
+        };
 
         // TODO: Allow expressions and print their result
-        let stmts = parser::parse(tokens.unwrap());
-        if stmts.is_err() {
+        let Ok(stmts) = parser::parse(tokens) else {
             continue;
-        }
+        };
 
-        let _ = interpreter.eval(stmts.unwrap());
+        let _ = interpreter.eval(stmts);
     }
 
     ExitCode::SUCCESS

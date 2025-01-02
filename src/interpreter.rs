@@ -54,7 +54,7 @@ impl Value {
     fn to_callable(&self, loc: Loc) -> Result<Callable> {
         match self {
             Value::Callable(callable) => Ok(callable.clone()),
-            _ => self.type_expected_error(loc, "callable(function/constructor)"),
+            _ => self.type_expected_error(loc, "function or constructor"),
         }
     }
 }
@@ -72,13 +72,13 @@ impl Scope {
 
     fn global() -> Self {
         Self {
-            symbols: HashMap::from(NATIVE_FUNCTIONS.map(|(name, fun_def)| {
+            symbols: HashMap::from(NATIVE_FUNCTIONS.map(|(name, arity, function)| {
                 (
                     name.to_owned(),
                     Value::Callable(Callable {
                         name: name.to_owned(),
-                        arity: fun_def.arity,
-                        fun: Function::Native(fun_def.fun),
+                        arity,
+                        fun: Function::Native(function),
                     }),
                 )
             })),

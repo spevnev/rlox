@@ -114,13 +114,15 @@ pub type NativeFunction = fn(Vec<Value>) -> Value;
 #[derive(PartialEq, Clone)]
 pub enum Function {
     Native(NativeFunction),
-    Lox(Vec<Token>, Vec<Stmt>), // params, body
+    /// params, body
+    Lox(Vec<Token>, Vec<Stmt>),
 }
 
 #[derive(PartialEq, Clone)]
 pub struct Callable {
     pub name: String,
-    pub arity: usize, // number of arguments
+    /// number of arguments
+    pub arity: usize,
     pub fun: Function,
 }
 
@@ -213,7 +215,7 @@ impl Lexer {
         self.index >= self.source.len()
     }
 
-    // Update location on '\n'.
+    /// Update location on '\n'.
     fn next_line(&mut self) {
         self.line_index = self.index;
         self.line += 1;
@@ -237,7 +239,7 @@ impl Lexer {
         Some(ch)
     }
 
-    // Advances if the next char is `c`.
+    /// Advances if the next char is `c`.
     fn consume(&mut self, c: char) -> bool {
         if self.is_done() || self.source[self.index] != c {
             return false;
