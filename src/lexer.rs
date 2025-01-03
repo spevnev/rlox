@@ -1,7 +1,8 @@
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     error::{error, print_error, Loc},
+    interpreter::Scope,
     parser::Stmt,
 };
 
@@ -113,25 +114,26 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
 
 pub type NativeFunction = fn(Vec<Value>) -> Value;
 
-pub struct LoxFunction {
+pub struct LoxFunctionDecl {
     pub params: Vec<Token>,
     pub body: Vec<Stmt>,
 }
 
-pub enum Function {
-    Native(NativeFunction),
-    /// params, body
-    Lox(Rc<LoxFunction>),
+pub struct LoxFunction {
+    pub decl: Rc<LoxFunctionDecl>,
+    pub closure: Rc<RefCell<Scope>>,
 }
 
-impl PartialEq for Function {
+impl PartialEq for LoxFunction {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Native(this), Self::Native(other)) => this == other,
-            (Self::Lox(this), Self::Lox(other)) => Rc::ptr_eq(this, other),
-            _ => false,
-        }
+        Rc::ptr_eq(&self.decl, &other.decl) && Rc::ptr_eq(&self.closure, &other.closure)
     }
+}
+
+#[derive(PartialEq)]
+pub enum Function {
+    Native(NativeFunction),
+    Lox(LoxFunction),
 }
 
 #[derive(PartialEq)]

@@ -1,6 +1,10 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    rc::Rc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use crate::lexer::{NativeFunction, Value};
+use crate::lexer::{Callable, Function, NativeFunction, Value};
 
 fn print(args: Vec<Value>) -> Value {
     assert!(args.len() == 1);
@@ -14,8 +18,21 @@ fn clock(args: Vec<Value>) -> Value {
     Value::Number(secs)
 }
 
-pub const NATIVE_FUNCTIONS: [(&'static str, usize, NativeFunction); 2] = [
+const NATIVE_FUNCTIONS: [(&'static str, usize, NativeFunction); 2] = [
     // name, arity, function
     ("print", 1, print),
     ("clock", 0, clock),
 ];
+
+pub fn get_native_functions_as_symbols() -> HashMap<String, Value> {
+    HashMap::from(NATIVE_FUNCTIONS.map(|(name, arity, function)| {
+        (
+            name.to_owned(),
+            Value::Callable(Rc::new(Callable {
+                name: name.to_owned(),
+                arity,
+                fun: Function::Native(function),
+            })),
+        )
+    }))
+}

@@ -1,9 +1,9 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, mem, rc::Rc};
 
 use crate::{
     error::{print_error, Loc},
-    lexer::{Callable, Function, TokenKind, Value},
-    native::NATIVE_FUNCTIONS,
+    lexer::{Callable, Function, LoxFunction, TokenKind, Value},
+    native::get_native_functions_as_symbols,
     parser::{Binary, Call, Expr, LocExpr, Stmt, Unary},
 };
 
@@ -59,48 +59,29 @@ impl Value {
     }
 }
 
-struct Scope {
+pub struct Scope {
+    parent: Option<Rc<RefCell<Scope>>>,
     symbols: HashMap<String, Value>,
 }
 
 impl Scope {
-    fn new() -> Self {
-        Self {
+    fn new(parent: Rc<RefCell<Self>>) -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self {
+            parent: Some(parent),
             symbols: HashMap::new(),
-        }
+        }))
     }
 
-    fn global() -> Self {
-        Self {
-            symbols: HashMap::from(NATIVE_FUNCTIONS.map(|(name, arity, function)| {
-                (
-                    name.to_owned(),
-                    Value::Callable(Rc::new(Callable {
-                        name: name.to_owned(),
-                        arity,
-                        fun: Function::Native(function),
-                    })),
-                )
-            })),
-        }
-    }
-}
-
-pub struct Interpreter {
-    scopes: Vec<Scope>,
-}
-
-impl Interpreter {
-    pub fn new() -> Self {
-        Self {
-            scopes: vec![Scope::global()],
-        }
+    fn global() -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self {
+            parent: None,
+            symbols: get_native_functions_as_symbols(),
+        }))
     }
 
     fn define_symbol(&mut self, loc: Loc, name: String, value: Value) -> Result<()> {
-        let scope = self.scopes.last_mut().expect("Interpreter must have a global scope.");
-        if !scope.symbols.contains_key(&name) {
-            scope.symbols.insert(name, value);
+        if !self.symbols.contains_key(&name) {
+            self.symbols.insert(name, value);
             Ok(())
         } else {
             print_error(loc, &format!("Redefinition of symbol '{}'", name));
@@ -108,27 +89,39 @@ impl Interpreter {
         }
     }
 
-    fn get_symbol(&self, loc: Loc, name: &str) -> Result<&Value> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(value) = scope.symbols.get(name) {
-                return Ok(value);
-            }
+    fn get_symbol(&self, loc: Loc, name: &str) -> Result<Value> {
+        if let Some(value) = self.symbols.get(name) {
+            Ok(value.clone())
+        } else if let Some(parent) = &self.parent {
+            RefCell::borrow(parent).get_symbol(loc, name)
+        } else {
+            print_error(loc, &format!("Undefined symbol '{}'", name));
+            Err(Error::UndefinedSymbol)
         }
-
-        print_error(loc, &format!("Undefined symbol '{}'", name));
-        Err(Error::UndefinedSymbol)
     }
 
     fn set_var(&mut self, loc: Loc, name: &str, value: Value) -> Result<()> {
-        for scope in self.scopes.iter_mut().rev() {
-            if let Some(var) = scope.symbols.get_mut(name) {
-                *var = value;
-                return Ok(());
-            }
+        if let Some(var) = self.symbols.get_mut(name) {
+            *var = value;
+            Ok(())
+        } else if let Some(parent) = &self.parent {
+            RefCell::borrow_mut(parent).set_var(loc, name, value)
+        } else {
+            print_error(loc, &format!("Assigning to undefined variable '{}'", name));
+            Err(Error::UndefinedSymbol)
         }
+    }
+}
 
-        print_error(loc, &format!("Assigning to undefined variable '{}'", name));
-        Err(Error::UndefinedSymbol)
+pub struct Interpreter {
+    scope: Rc<RefCell<Scope>>,
+}
+
+impl Interpreter {
+    pub fn new() -> Self {
+        Self {
+            scope: Scope::global(),
+        }
     }
 
     fn eval_unary(&mut self, unary: &Unary) -> Result<Value> {
@@ -235,27 +228,25 @@ impl Interpreter {
 
         match &callable.fun {
             Function::Native(fun) => Ok(fun(arg_values)),
-            Function::Lox(function) => {
-                let scope = Scope::new();
-                self.scopes.push(scope);
+            Function::Lox(LoxFunction { decl, closure }) => {
+                let new_scope = Scope::new(closure.clone());
+                let prev_scope = mem::replace(&mut self.scope, new_scope);
 
-                assert!(function.params.len() == call.args.len());
-                for (param_token, arg) in function.params.iter().zip(call.args.iter()) {
+                assert!(decl.params.len() == call.args.len());
+                for (param_token, arg) in decl.params.iter().zip(call.args.iter()) {
                     let value = self.eval_expr(arg)?;
                     let param = param_token.to_identifier().expect("Parameter name must be an identifier.");
-                    self.define_symbol(param_token.loc, param, value)?;
+                    RefCell::borrow_mut(&self.scope).define_symbol(param_token.loc, param, value)?;
                 }
 
-                let result = match self.eval(&function.body) {
-                    Ok(_) => Value::Null,
-                    Err(err) => match err {
-                        Error::Return(value) => value,
-                        _ => return Err(err),
-                    },
+                let result = match self.eval(&decl.body) {
+                    Err(Error::Return(value)) => Ok(value),
+                    Ok(_) => Ok(Value::Null),
+                    Err(err) => Err(err),
                 };
 
-                self.scopes.pop();
-                Ok(result)
+                self.scope = prev_scope;
+                result
             },
         }
     }
@@ -266,10 +257,10 @@ impl Interpreter {
             Expr::Unary(unary) => self.eval_unary(unary),
             Expr::Binary(binary) => self.eval_binary(binary),
             Expr::Logical(binary) => self.eval_logical(binary),
-            Expr::Var(var) => Ok(self.get_symbol(expr.loc, &var)?.clone()),
+            Expr::Var(var) => Ok(RefCell::borrow(&self.scope).get_symbol(expr.loc, &var)?),
             Expr::Assign(assign) => {
                 let value = self.eval_expr(&assign.expr)?;
-                self.set_var(expr.loc, &assign.var, value.clone())?;
+                RefCell::borrow_mut(&self.scope).set_var(expr.loc, &assign.var, value.clone())?;
                 Ok(value)
             },
             Expr::Call(call) => self.eval_call(call),
@@ -282,16 +273,18 @@ impl Interpreter {
                 let _ = self.eval_expr(expr)?;
             },
             Stmt::Block(stmts) => {
-                self.scopes.push(Scope::new());
+                let new_scope = Scope::new(self.scope.clone());
+                let prev_scope = mem::replace(&mut self.scope, new_scope);
 
                 for stmt in stmts {
-                    self.eval_stmt(stmt).inspect_err(|_| {
+                    if let Err(err) = self.eval_stmt(stmt) {
                         // Pop the scope on error and propagate it
-                        let _ = self.scopes.pop();
-                    })?;
+                        self.scope = prev_scope;
+                        return Err(err);
+                    }
                 }
 
-                self.scopes.pop();
+                self.scope = prev_scope;
             },
             Stmt::If(condition, then_branch, else_branch) => {
                 let result = self.eval_expr(condition)?;
@@ -309,17 +302,20 @@ impl Interpreter {
             Stmt::VarDecl(name_token, init) => {
                 let name = name_token.to_identifier().expect("Variable name must be an identifier.");
                 let value = self.eval_expr(init)?;
-                self.define_symbol(name_token.loc, name, value)?;
+                RefCell::borrow_mut(&self.scope).define_symbol(name_token.loc, name, value)?;
             },
-            Stmt::FunDecl(name_token, function) => {
+            Stmt::FunDecl(name_token, decl) => {
                 let name = name_token.to_identifier().expect("Function name must be an identifier.");
                 let callable = Value::Callable(Rc::new(Callable {
                     name: name.clone(),
-                    arity: function.params.len(),
-                    fun: Function::Lox(function.clone()),
+                    arity: decl.params.len(),
+                    fun: Function::Lox(LoxFunction {
+                        decl: decl.clone(),
+                        closure: self.scope.clone(),
+                    }),
                 }));
 
-                self.define_symbol(name_token.loc, name, callable)?;
+                RefCell::borrow_mut(&self.scope).define_symbol(name_token.loc, name, callable)?;
             },
             Stmt::Return(expr) => {
                 let value = self.eval_expr(expr)?;

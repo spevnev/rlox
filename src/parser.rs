@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     error::{error, print_error, Loc},
-    lexer::{LoxFunction, Token, TokenKind, Value},
+    lexer::{LoxFunctionDecl, Token, TokenKind, Value},
 };
 
 pub struct Unary {
@@ -127,7 +127,7 @@ pub enum Stmt {
     /// name, init
     VarDecl(Token, LocExpr),
     /// name, function
-    FunDecl(Token, Rc<LoxFunction>),
+    FunDecl(Token, Rc<LoxFunctionDecl>),
     Return(LocExpr),
 }
 
@@ -610,7 +610,7 @@ impl Parser {
         self.expect(&TokenKind::LeftBrace, "Expected '{' after function parameters")?;
         let body = self.parse_block()?;
 
-        Ok(Stmt::FunDecl(name, Rc::new(LoxFunction { params, body })))
+        Ok(Stmt::FunDecl(name, Rc::new(LoxFunctionDecl { params, body })))
     }
 
     fn parse_decl(&mut self) -> Option<Stmt> {
