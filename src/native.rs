@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    interpreter::{Function, NativeFunction},
+    interpreter::{Function, NativeFun},
     lexer::{Callable, Value},
 };
 
@@ -21,20 +21,20 @@ fn clock(args: Vec<Value>) -> Value {
     Value::Number(secs)
 }
 
-const NATIVE_FUNCTIONS: [(&'static str, usize, NativeFunction); 2] = [
+const NATIVE_FUNCTIONS: [(&'static str, usize, NativeFun); 2] = [
     // name, arity, function
     ("print", 1, print),
     ("clock", 0, clock),
 ];
 
 pub fn get_native_functions_as_symbols() -> HashMap<String, Value> {
-    HashMap::from(NATIVE_FUNCTIONS.map(|(name, arity, function)| {
+    HashMap::from(NATIVE_FUNCTIONS.map(|(name, arity, fun)| {
         (
             name.to_owned(),
             Value::Callable(Rc::new(Callable {
                 name: name.to_owned(),
                 arity,
-                fun: Function::Native(function),
+                fun: Function::Native(fun),
             })),
         )
     }))

@@ -31,7 +31,7 @@ pub enum Expr {
     Unary(Unary),
     Binary(Binary),
     Logical(Binary),
-    Var(String),
+    Variable(String),
     Assign(Assign),
     Call(Call),
 }
@@ -42,14 +42,6 @@ pub struct LocExpr {
 }
 
 impl LocExpr {
-    /// Placeholder value for places where LocExpr is expected but won't be used.
-    fn null() -> Self {
-        Self {
-            loc: Loc::none(),
-            expr: Expr::Literal(Value::Null),
-        }
-    }
-
     fn new_literal(loc: Loc, value: Value) -> Self {
         Self {
             loc,
@@ -92,7 +84,7 @@ impl LocExpr {
     fn new_var(loc: Loc, var: String) -> Self {
         Self {
             loc,
-            expr: Expr::Var(var),
+            expr: Expr::Variable(var),
         }
     }
 
@@ -117,22 +109,39 @@ impl LocExpr {
     }
 }
 
-pub struct LoxFunctionDecl {
+pub struct LoxFunDecl {
     pub params: Vec<Token>,
     pub body: Vec<Stmt>,
+}
+
+pub struct If {
+    pub condition: LocExpr,
+    pub then_branch: Box<Stmt>,
+    pub else_branch: Option<Box<Stmt>>,
+}
+
+pub struct While {
+    pub condition: LocExpr,
+    pub body: Box<Stmt>,
+}
+
+pub struct VarDecl {
+    pub name: Token,
+    pub init: LocExpr,
+}
+
+pub struct FunDecl {
+    pub name: Token,
+    pub decl: Rc<LoxFunDecl>,
 }
 
 pub enum Stmt {
     Expr(LocExpr),
     Block(Vec<Stmt>),
-    /// condition, then, else
-    If(LocExpr, Box<Stmt>, Option<Box<Stmt>>),
-    /// condition, body
-    While(LocExpr, Box<Stmt>),
-    /// name, init
-    VarDecl(Token, LocExpr),
-    /// name, function
-    FunDecl(Token, Rc<LoxFunctionDecl>),
+    If(If),
+    While(While),
+    VarDecl(VarDecl),
+    FunDecl(FunDecl),
     Return(LocExpr),
 }
 
@@ -427,7 +436,7 @@ impl Parser {
 
         if self.try_consume(&TokenKind::Equal) {
             match l_expr.expr {
-                Expr::Var(var) => {
+                Expr::Variable(var) => {
                     let r_expr = self.parse_expr()?;
                     Ok(LocExpr::new_assign(l_expr.loc, var, r_expr))
                 },
@@ -437,7 +446,10 @@ impl Parser {
                     // set `had_error` and return `null` value since it won't be used anyways.
                     self.had_error = true;
                     print_error(l_expr.loc, "Invalid l-value");
-                    Ok(LocExpr::null())
+                    Ok(LocExpr {
+                        loc: Loc::none(),
+                        expr: Expr::Literal(Value::Null),
+                    })
                 },
             }
         } else {
@@ -461,14 +473,18 @@ impl Parser {
         let condition = self.parse_expr()?;
         self.expect(&TokenKind::RightParen, "Unclosed '(', expected ')' after the condition")?;
 
-        let then_branch = self.parse_stmt()?;
+        let then_branch = Box::new(self.parse_stmt()?);
         let else_branch = if self.try_consume(&TokenKind::Else) {
             Some(Box::new(self.parse_stmt()?))
         } else {
             None
         };
 
-        Ok(Stmt::If(condition, Box::new(then_branch), else_branch))
+        Ok(Stmt::If(If {
+            condition,
+            then_branch,
+            else_branch,
+        }))
     }
 
     fn parse_while_stmt(&mut self) -> Result<Stmt, ()> {
@@ -476,8 +492,9 @@ impl Parser {
         let condition = self.parse_expr()?;
         self.expect(&TokenKind::RightParen, "Unclosed '(', expected ')' after the condition")?;
 
-        let body = self.parse_stmt()?;
-        Ok(Stmt::While(condition, Box::new(body)))
+        let body = Box::new(self.parse_stmt()?);
+
+        Ok(Stmt::While(While { condition, body }))
     }
 
     fn parse_for_stmt(&mut self) -> Result<Stmt, ()> {
@@ -512,17 +529,18 @@ impl Parser {
         let body = self.parse_stmt()?;
 
         // Instead of adding a new statement kind, `for` is transformed into `while`.
-        let while_body = if update.is_some() {
-            Stmt::Block(vec![body, update.unwrap()])
-        } else {
-            body
+        let while_body = match update {
+            Some(update) => Stmt::Block(vec![body, update]),
+            None => body,
         };
-        let while_loop = Stmt::While(condition, Box::new(while_body));
+        let while_loop = Stmt::While(While {
+            condition,
+            body: Box::new(while_body),
+        });
 
-        if initializer.is_some() {
-            Ok(Stmt::Block(vec![initializer.unwrap(), while_loop]))
-        } else {
-            Ok(while_loop)
+        match initializer {
+            Some(initializer) => Ok(Stmt::Block(vec![initializer, while_loop])),
+            None => Ok(while_loop),
         }
     }
 
@@ -577,7 +595,7 @@ impl Parser {
             "Expected semicolon after the variable declaration",
         )?;
 
-        Ok(Stmt::VarDecl(name, init))
+        Ok(Stmt::VarDecl(VarDecl { name, init }))
     }
 
     fn parse_params(&mut self) -> Result<Vec<Token>, ()> {
@@ -615,7 +633,10 @@ impl Parser {
         self.expect(&TokenKind::LeftBrace, "Expected '{' after function parameters")?;
         let body = self.parse_block()?;
 
-        Ok(Stmt::FunDecl(name, Rc::new(LoxFunctionDecl { params, body })))
+        Ok(Stmt::FunDecl(FunDecl {
+            name,
+            decl: Rc::new(LoxFunDecl { params, body }),
+        }))
     }
 
     fn parse_decl(&mut self) -> Option<Stmt> {
@@ -628,11 +649,12 @@ impl Parser {
             },
         };
 
-        if result.is_ok() {
-            Some(result.unwrap())
-        } else {
-            self.sync();
-            None
+        match result {
+            Ok(value) => Some(value),
+            Err(_) => {
+                self.sync();
+                None
+            },
         }
     }
 }

@@ -4,7 +4,7 @@ use crate::{
     error::{print_error, Loc},
     lexer::{Callable, TokenKind, Value},
     native::get_native_functions_as_symbols,
-    parser::{Binary, Call, Expr, LocExpr, LoxFunctionDecl, Stmt, Unary},
+    parser::{Binary, Call, Expr, FunDecl, If, LocExpr, LoxFunDecl, Stmt, Unary, VarDecl, While},
 };
 
 pub enum Error {
@@ -20,14 +20,14 @@ pub enum Error {
 
 type Result<V, E = Error> = std::result::Result<V, E>;
 
-pub type NativeFunction = fn(Vec<Value>) -> Value;
+pub type NativeFun = fn(Vec<Value>) -> Value;
 
-pub struct LoxFunction {
-    pub decl: Rc<LoxFunctionDecl>,
-    pub closure: Rc<RefCell<Scope>>,
+pub struct LoxFun {
+    decl: Rc<LoxFunDecl>,
+    closure: Rc<RefCell<Scope>>,
 }
 
-impl PartialEq for LoxFunction {
+impl PartialEq for LoxFun {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.decl, &other.decl) && Rc::ptr_eq(&self.closure, &other.closure)
     }
@@ -35,8 +35,8 @@ impl PartialEq for LoxFunction {
 
 #[derive(PartialEq)]
 pub enum Function {
-    Native(NativeFunction),
-    Lox(LoxFunction),
+    Native(NativeFun),
+    Lox(LoxFun),
 }
 
 impl Value {
@@ -78,7 +78,7 @@ impl Value {
     }
 }
 
-pub struct Scope {
+struct Scope {
     parent: Option<Rc<RefCell<Scope>>>,
     symbols: HashMap<String, Value>,
 }
@@ -141,6 +141,18 @@ impl Interpreter {
         Self {
             scope: Scope::global(),
         }
+    }
+
+    fn define_symbol(&self, loc: Loc, name: String, value: Value) -> Result<()> {
+        RefCell::borrow_mut(&self.scope).define_symbol(loc, name, value)
+    }
+
+    fn get_symbol(&self, loc: Loc, name: &str) -> Result<Value> {
+        RefCell::borrow(&self.scope).get_symbol(loc, name)
+    }
+
+    fn set_var(&mut self, loc: Loc, name: &str, value: Value) -> Result<()> {
+        RefCell::borrow_mut(&self.scope).set_var(loc, name, value)
     }
 
     fn eval_unary(&mut self, unary: &Unary) -> Result<Value> {
@@ -247,7 +259,7 @@ impl Interpreter {
 
         match &callable.fun {
             Function::Native(fun) => Ok(fun(arg_values)),
-            Function::Lox(LoxFunction { decl, closure }) => {
+            Function::Lox(LoxFun { decl, closure }) => {
                 let new_scope = Scope::new(closure.clone());
                 let prev_scope = mem::replace(&mut self.scope, new_scope);
 
@@ -255,7 +267,7 @@ impl Interpreter {
                 for (param_token, arg) in decl.params.iter().zip(call.args.iter()) {
                     let value = self.eval_expr(arg)?;
                     let param = param_token.to_identifier().expect("Parameter name must be an identifier.");
-                    RefCell::borrow_mut(&self.scope).define_symbol(param_token.loc, param, value)?;
+                    self.define_symbol(param_token.loc, param, value)?;
                 }
 
                 let result = match self.eval(&decl.body) {
@@ -276,10 +288,10 @@ impl Interpreter {
             Expr::Unary(unary) => self.eval_unary(unary),
             Expr::Binary(binary) => self.eval_binary(binary),
             Expr::Logical(binary) => self.eval_logical(binary),
-            Expr::Var(var) => Ok(RefCell::borrow(&self.scope).get_symbol(expr.loc, &var)?),
+            Expr::Variable(var) => Ok(self.get_symbol(expr.loc, &var)?),
             Expr::Assign(assign) => {
                 let value = self.eval_expr(&assign.expr)?;
-                RefCell::borrow_mut(&self.scope).set_var(expr.loc, &assign.var, value.clone())?;
+                self.set_var(expr.loc, &assign.var, value.clone())?;
                 Ok(value)
             },
             Expr::Call(call) => self.eval_call(call),
@@ -305,7 +317,11 @@ impl Interpreter {
 
                 self.scope = prev_scope;
             },
-            Stmt::If(condition, then_branch, else_branch) => {
+            Stmt::If(If {
+                condition,
+                then_branch,
+                else_branch,
+            }) => {
                 let result = self.eval_expr(condition)?;
                 if result.is_truthy() {
                     self.eval_stmt(then_branch)?;
@@ -313,28 +329,33 @@ impl Interpreter {
                     self.eval_stmt(else_branch.as_ref().unwrap())?;
                 }
             },
-            Stmt::While(condition, body) => {
+            Stmt::While(While { condition, body }) => {
                 while self.eval_expr(condition)?.is_truthy() {
                     self.eval_stmt(body)?;
                 }
             },
-            Stmt::VarDecl(name_token, init) => {
+            Stmt::VarDecl(VarDecl {
+                name: name_token,
+                init,
+            }) => {
                 let name = name_token.to_identifier().expect("Variable name must be an identifier.");
                 let value = self.eval_expr(init)?;
-                RefCell::borrow_mut(&self.scope).define_symbol(name_token.loc, name, value)?;
+                self.define_symbol(name_token.loc, name, value)?;
             },
-            Stmt::FunDecl(name_token, decl) => {
+            Stmt::FunDecl(FunDecl {
+                name: name_token,
+                decl,
+            }) => {
                 let name = name_token.to_identifier().expect("Function name must be an identifier.");
                 let callable = Value::Callable(Rc::new(Callable {
                     name: name.clone(),
                     arity: decl.params.len(),
-                    fun: Function::Lox(LoxFunction {
+                    fun: Function::Lox(LoxFun {
                         decl: decl.clone(),
                         closure: self.scope.clone(),
                     }),
                 }));
-
-                RefCell::borrow_mut(&self.scope).define_symbol(name_token.loc, name, callable)?;
+                self.define_symbol(name_token.loc, name, callable)?;
             },
             Stmt::Return(expr) => {
                 let value = self.eval_expr(expr)?;
