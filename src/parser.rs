@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     error::{error, print_error, Loc},
-    lexer::{LoxFunctionDecl, Token, TokenKind, Value},
+    lexer::{Token, TokenKind, Value},
 };
 
 pub struct Unary {
@@ -115,6 +115,11 @@ impl LocExpr {
             }),
         }
     }
+}
+
+pub struct LoxFunctionDecl {
+    pub params: Vec<Token>,
+    pub body: Vec<Stmt>,
 }
 
 pub enum Stmt {

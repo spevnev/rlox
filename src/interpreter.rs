@@ -2,9 +2,9 @@ use std::{cell::RefCell, collections::HashMap, mem, rc::Rc};
 
 use crate::{
     error::{print_error, Loc},
-    lexer::{Callable, Function, LoxFunction, TokenKind, Value},
+    lexer::{Callable, TokenKind, Value},
     native::get_native_functions_as_symbols,
-    parser::{Binary, Call, Expr, LocExpr, Stmt, Unary},
+    parser::{Binary, Call, Expr, LocExpr, LoxFunctionDecl, Stmt, Unary},
 };
 
 pub enum Error {
@@ -19,6 +19,25 @@ pub enum Error {
 }
 
 type Result<V, E = Error> = std::result::Result<V, E>;
+
+pub type NativeFunction = fn(Vec<Value>) -> Value;
+
+pub struct LoxFunction {
+    pub decl: Rc<LoxFunctionDecl>,
+    pub closure: Rc<RefCell<Scope>>,
+}
+
+impl PartialEq for LoxFunction {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.decl, &other.decl) && Rc::ptr_eq(&self.closure, &other.closure)
+    }
+}
+
+#[derive(PartialEq)]
+pub enum Function {
+    Native(NativeFunction),
+    Lox(LoxFunction),
+}
 
 impl Value {
     fn type_expected_error<T>(&self, loc: Loc, expected: &str) -> Result<T> {

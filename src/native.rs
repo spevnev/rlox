@@ -4,7 +4,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::lexer::{Callable, Function, NativeFunction, Value};
+use crate::{
+    interpreter::{Function, NativeFunction},
+    lexer::{Callable, Value},
+};
 
 fn print(args: Vec<Value>) -> Value {
     assert!(args.len() == 1);
