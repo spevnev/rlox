@@ -5,12 +5,16 @@ use std::{
 };
 
 use interpreter::Interpreter;
+use lexer::tokenize;
+use parser::parse;
+use resolver::resolve;
 
 mod error;
 mod interpreter;
 mod lexer;
 mod native;
 mod parser;
+mod resolver;
 
 fn run_repl() -> ExitCode {
     let mut interpreter = Interpreter::new();
@@ -27,15 +31,16 @@ fn run_repl() -> ExitCode {
             break;
         }
 
-        let Ok(tokens) = lexer::tokenize(&line) else {
+        let Ok(tokens) = tokenize(&line) else {
             continue;
         };
-
         // TODO: Allow expressions and print their result
-        let Ok(stmts) = parser::parse(tokens) else {
+        let Ok(stmts) = parse(tokens) else {
             continue;
         };
-
+        let Ok(_) = resolve(&stmts) else {
+            continue;
+        };
         let _ = interpreter.eval(&stmts);
     }
 
@@ -51,10 +56,13 @@ fn run_file(path: &str) -> ExitCode {
         },
     };
 
-    let Ok(tokens) = lexer::tokenize(&source) else {
+    let Ok(tokens) = tokenize(&source) else {
         return ExitCode::FAILURE;
     };
-    let Ok(stmts) = parser::parse(tokens) else {
+    let Ok(stmts) = parse(tokens) else {
+        return ExitCode::FAILURE;
+    };
+    let Ok(_) = resolve(&stmts) else {
         return ExitCode::FAILURE;
     };
     let Ok(_) = Interpreter::new().eval(&stmts) else {

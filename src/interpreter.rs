@@ -4,7 +4,7 @@ use crate::{
     error::{print_error, Loc},
     lexer::{Callable, TokenKind, Value},
     native::get_native_functions_as_symbols,
-    parser::{Binary, Call, Expr, FunDecl, If, LocExpr, LoxFunDecl, Stmt, Unary, VarDecl, While},
+    parser::{Binary, Call, Expr, FunDecl, If, LocExpr, LoxFunDecl, Stmt, Unary, Var, VarDecl, While},
 };
 
 pub enum Error {
@@ -15,7 +15,7 @@ pub enum Error {
     WrongArity,
 
     // The following aren't actual errors, and are used to quickly return from a deeply nested call:
-    Return(Value),
+    Return(Loc, Value),
 }
 
 type Result<V, E = Error> = std::result::Result<V, E>;
@@ -91,7 +91,7 @@ impl Scope {
         }))
     }
 
-    fn global() -> Rc<RefCell<Self>> {
+    fn new_global() -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(Self {
             parent: None,
             symbols: get_native_functions_as_symbols(),
@@ -111,11 +111,19 @@ impl Scope {
     fn get_symbol(&self, loc: Loc, name: &str) -> Result<Value> {
         if let Some(value) = self.symbols.get(name) {
             Ok(value.clone())
-        } else if let Some(parent) = &self.parent {
-            RefCell::borrow(parent).get_symbol(loc, name)
         } else {
             print_error(loc, &format!("Undefined symbol '{}'", name));
             Err(Error::UndefinedSymbol)
+        }
+    }
+
+    fn get_symbol_at(&self, loc: Loc, name: &str, depth: i32) -> Result<Value> {
+        if depth == 0 {
+            self.get_symbol(loc, name)
+        } else if let Some(parent) = &self.parent {
+            RefCell::borrow(parent).get_symbol_at(loc, name, depth - 1)
+        } else {
+            todo!()
         }
     }
 
@@ -123,23 +131,34 @@ impl Scope {
         if let Some(var) = self.symbols.get_mut(name) {
             *var = value;
             Ok(())
-        } else if let Some(parent) = &self.parent {
-            RefCell::borrow_mut(parent).set_var(loc, name, value)
         } else {
             print_error(loc, &format!("Assigning to undefined variable '{}'", name));
             Err(Error::UndefinedSymbol)
         }
     }
+    fn set_var_at(&mut self, loc: Loc, name: &str, value: Value, depth: i32) -> Result<()> {
+        if depth == 0 {
+            self.set_var(loc, name, value)
+        } else if let Some(parent) = &self.parent {
+            RefCell::borrow_mut(parent).set_var_at(loc, name, value, depth - 1)
+        } else {
+            todo!()
+        }
+    }
+
 }
 
 pub struct Interpreter {
+    global: Rc<RefCell<Scope>>,
     scope: Rc<RefCell<Scope>>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
+        let global = Scope::new_global();
         Self {
-            scope: Scope::global(),
+            scope: global.clone(),
+            global,
         }
     }
 
@@ -147,12 +166,22 @@ impl Interpreter {
         RefCell::borrow_mut(&self.scope).define_symbol(loc, name, value)
     }
 
-    fn get_symbol(&self, loc: Loc, name: &str) -> Result<Value> {
-        RefCell::borrow(&self.scope).get_symbol(loc, name)
+    fn get_symbol(&self, loc: Loc, var: &Var) -> Result<Value> {
+        let depth = *RefCell::borrow(&var.depth);
+        if depth == -1 {
+            RefCell::borrow(&self.global).get_symbol(loc, &var.name)
+        } else {
+            RefCell::borrow(&self.scope).get_symbol_at(loc, &var.name, depth)
+        }
     }
 
-    fn set_var(&mut self, loc: Loc, name: &str, value: Value) -> Result<()> {
-        RefCell::borrow_mut(&self.scope).set_var(loc, name, value)
+    fn set_var(&mut self, loc: Loc, var: &Var, value: Value) -> Result<()> {
+        let depth = *RefCell::borrow(&var.depth);
+        if depth == -1 {
+            RefCell::borrow_mut(&self.global).set_var(loc, &var.name, value)
+        } else {
+            RefCell::borrow_mut(&self.scope).set_var_at(loc, &var.name, value, depth)
+        }
     }
 
     fn eval_unary(&mut self, unary: &Unary) -> Result<Value> {
@@ -270,8 +299,8 @@ impl Interpreter {
                     self.define_symbol(param_token.loc, param, value)?;
                 }
 
-                let result = match self.eval(&decl.body) {
-                    Err(Error::Return(value)) => Ok(value),
+                let result = match self.eval_stmts(&decl.body) {
+                    Err(Error::Return(_, value)) => Ok(value),
                     Ok(_) => Ok(Value::Null),
                     Err(err) => Err(err),
                 };
@@ -325,8 +354,8 @@ impl Interpreter {
                 let result = self.eval_expr(condition)?;
                 if result.is_truthy() {
                     self.eval_stmt(then_branch)?;
-                } else if else_branch.is_some() {
-                    self.eval_stmt(else_branch.as_ref().unwrap())?;
+                } else if let Some(else_branch) = else_branch {
+                    self.eval_stmt(else_branch)?;
                 }
             },
             Stmt::While(While { condition, body }) => {
@@ -359,17 +388,27 @@ impl Interpreter {
             },
             Stmt::Return(expr) => {
                 let value = self.eval_expr(expr)?;
-                return Err(Error::Return(value));
+                return Err(Error::Return(expr.loc, value));
             },
         };
 
         Ok(())
     }
 
-    pub fn eval(&mut self, stmts: &Vec<Stmt>) -> Result<()> {
+    fn eval_stmts(&mut self, stmts: &Vec<Stmt>) -> Result<()> {
         for stmt in stmts {
             self.eval_stmt(stmt)?;
         }
+
+        Ok(())
+    }
+
+    pub fn eval(&mut self, stmts: &Vec<Stmt>) -> Result<()> {
+        match self.eval_stmts(stmts) {
+            Err(Error::Return(loc, _)) => print_error(loc, "Return outside of function"),
+            Err(err) => return Err(err),
+            Ok(_) => {},
+        };
 
         Ok(())
     }

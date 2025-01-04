@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     error::{error, print_error, Loc},
@@ -16,8 +16,22 @@ pub struct Binary {
     pub right: Box<LocExpr>,
 }
 
+pub struct Var {
+    pub name: String,
+    pub depth: RefCell<i32>,
+}
+
+impl Var {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            depth: RefCell::new(-1),
+        }
+    }
+}
+
 pub struct Assign {
-    pub var: String,
+    pub var: Var,
     pub expr: Box<LocExpr>,
 }
 
@@ -31,7 +45,7 @@ pub enum Expr {
     Unary(Unary),
     Binary(Binary),
     Logical(Binary),
-    Variable(String),
+    Variable(Var),
     Assign(Assign),
     Call(Call),
 }
@@ -81,18 +95,18 @@ impl LocExpr {
         }
     }
 
-    fn new_var(loc: Loc, var: String) -> Self {
+    fn new_var(loc: Loc, name: String) -> Self {
         Self {
             loc,
-            expr: Expr::Variable(var),
+            expr: Expr::Variable(Var::new(name)),
         }
     }
 
-    fn new_assign(loc: Loc, var: String, expr: Self) -> Self {
+    fn new_assign(loc: Loc, name: String, expr: Self) -> Self {
         Self {
             loc,
             expr: Expr::Assign(Assign {
-                var,
+                var: Var::new(name),
                 expr: Box::new(expr),
             }),
         }
@@ -438,7 +452,7 @@ impl Parser {
             match l_expr.expr {
                 Expr::Variable(var) => {
                     let r_expr = self.parse_expr()?;
-                    Ok(LocExpr::new_assign(l_expr.loc, var, r_expr))
+                    Ok(LocExpr::new_assign(l_expr.loc, var.name, r_expr))
                 },
                 _ => {
                     // Parser is still in a valid state that doesn't require syncing.
