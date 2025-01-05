@@ -1,9 +1,32 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::Cell, rc::Rc};
 
 use crate::{
     error::{error, print_error, Loc},
     lexer::{Token, TokenKind, Value},
 };
+
+impl Token {
+    fn to_error_string(&self) -> String {
+        match self.kind {
+            TokenKind::Number | TokenKind::String | TokenKind::Identifier => self.value.convert_to_string(true),
+            _ => self.kind.to_string().to_owned(),
+        }
+    }
+
+    fn type_expected_error<T>(&self, expected: &str) -> Result<T, ()> {
+        error(
+            self.loc,
+            &format!("Expected {expected} but found '{}'", self.to_error_string()),
+        )
+    }
+
+    fn to_identifier(&self) -> Result<String, ()> {
+        match &self.value {
+            Value::Identifier(id) => Ok(id.clone()),
+            _ => self.type_expected_error("identifier"),
+        }
+    }
+}
 
 pub struct Unary {
     pub op: TokenKind,
@@ -16,16 +39,24 @@ pub struct Binary {
     pub right: Box<LocExpr>,
 }
 
+/// Specifies in which scope the variable that `Var` references is defined.
+#[derive(Clone, Copy)]
+pub enum VarScope {
+    Global,
+    /// Number of scopes to go outwards from the current one.
+    Relative(i32),
+}
+
 pub struct Var {
     pub name: String,
-    pub depth: RefCell<i32>,
+    pub scope: Cell<VarScope>,
 }
 
 impl Var {
     pub fn new(name: String) -> Self {
         Self {
             name,
-            depth: RefCell::new(-1),
+            scope: Cell::new(VarScope::Global),
         }
     }
 }
@@ -123,8 +154,13 @@ impl LocExpr {
     }
 }
 
+pub struct LoxFunParam {
+    pub loc: Loc,
+    pub name: String,
+}
+
 pub struct LoxFunDecl {
-    pub params: Vec<Token>,
+    pub params: Vec<LoxFunParam>,
     pub body: Vec<Stmt>,
 }
 
@@ -140,12 +176,14 @@ pub struct While {
 }
 
 pub struct VarDecl {
-    pub name: Token,
+    pub name_loc: Loc,
+    pub name: String,
     pub init: LocExpr,
 }
 
 pub struct FunDecl {
-    pub name: Token,
+    pub name_loc: Loc,
+    pub name: String,
     pub decl: Rc<LoxFunDecl>,
 }
 
@@ -203,8 +241,8 @@ impl Parser {
         self.index >= self.tokens.len()
     }
 
-    fn is_next(&mut self, kind: &TokenKind) -> bool {
-        !self.is_done() && self.tokens[self.index].kind == *kind
+    fn is_next(&mut self, kind: TokenKind) -> bool {
+        !self.is_done() && self.tokens[self.index].kind == kind
     }
 
     fn is_next_many(&mut self, kinds: &[TokenKind]) -> bool {
@@ -231,14 +269,14 @@ impl Parser {
         Some(token)
     }
 
-    /// Un-advances to the previous token
+    /// Un-advances to the previous token.
     fn back(&mut self) {
         assert!(self.index > 0, "Previous token must exist");
         self.index -= 1;
     }
 
     /// Advances if the next token is of kind `kind`.
-    fn try_consume(&mut self, kind: &TokenKind) -> bool {
+    fn try_consume(&mut self, kind: TokenKind) -> bool {
         if self.is_done() {
             return false;
         }
@@ -252,7 +290,7 @@ impl Parser {
     }
 
     /// Advances if the next token is of kind `kind` or returns error.
-    fn consume(&mut self, kind: &TokenKind) -> Result<Token, ()> {
+    fn consume(&mut self, kind: TokenKind) -> Result<Token, ()> {
         if self.is_done() {
             return error(
                 self.eof_loc,
@@ -277,7 +315,7 @@ impl Parser {
 
     /// Advances and returns error with `error_message` if the next token is not of kind `kind`.
     /// Intended for `(`, `)`, `;` since it reports at the location right after the previous token.
-    fn expect(&mut self, kind: &TokenKind, error_message: &str) -> Result<(), ()> {
+    fn expect(&mut self, kind: TokenKind, error_message: &str) -> Result<(), ()> {
         if self.try_consume(kind) {
             Ok(())
         } else {
@@ -289,7 +327,7 @@ impl Parser {
     fn sync(&mut self) {
         self.had_error = true;
         while !self.is_done()
-            && !self.try_consume(&TokenKind::Semicolon)
+            && !self.try_consume(TokenKind::Semicolon)
             && !self.is_next_many(&[
                 TokenKind::Class,
                 TokenKind::Fun,
@@ -318,7 +356,7 @@ impl Parser {
             TokenKind::Identifier => Ok(LocExpr::new_var(token.loc, token.to_identifier()?)),
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
-                self.expect(&TokenKind::RightParen, "Unclosed '(', expected ')'")?;
+                self.expect(TokenKind::RightParen, "Unclosed '(', expected ')'")?;
                 Ok(expr)
             },
             _ => error(token.loc, "Expected expression"),
@@ -328,22 +366,22 @@ impl Parser {
     fn parse_args(&mut self) -> Result<Vec<LocExpr>, ()> {
         let mut args = Vec::new();
 
-        if self.try_consume(&TokenKind::RightParen) {
+        if self.try_consume(TokenKind::RightParen) {
             return Ok(args);
         }
 
         args.push(self.parse_expr()?);
-        while args.len() < Self::MAX_ARGS && self.try_consume(&TokenKind::Comma) {
+        while args.len() < Self::MAX_ARGS && self.try_consume(TokenKind::Comma) {
             args.push(self.parse_expr()?);
         }
-        if self.is_next(&TokenKind::Comma) {
+        if self.is_next(TokenKind::Comma) {
             self.had_error = true;
             print_error(
                 self.tokens[self.index + 1].loc,
                 &format!("Max number of arguments is {}", Self::MAX_ARGS),
             );
         }
-        self.expect(&TokenKind::RightParen, "Unclosed '(', expected ')' after the arguments")?;
+        self.expect(TokenKind::RightParen, "Unclosed '(', expected ')' after the arguments")?;
 
         Ok(args)
     }
@@ -351,8 +389,16 @@ impl Parser {
     fn parse_call(&mut self) -> Result<LocExpr, ()> {
         let mut expr = self.parse_primary()?;
 
-        while self.try_consume(&TokenKind::LeftParen) {
-            expr = LocExpr::new_call(expr, self.parse_args()?);
+        while !self.is_done() {
+            match self.advance().unwrap().kind {
+                TokenKind::LeftParen => {
+                    expr = LocExpr::new_call(expr, self.parse_args()?);
+                },
+                _ => {
+                    self.back();
+                    break;
+                },
+            }
         }
 
         Ok(expr)
@@ -424,7 +470,7 @@ impl Parser {
     fn parse_logic_and(&mut self) -> Result<LocExpr, ()> {
         let mut expr = self.parse_equality()?;
 
-        while self.is_next(&TokenKind::AndAnd) {
+        while self.is_next(TokenKind::AndAnd) {
             let op = self.advance().unwrap();
             let right = self.parse_equality()?;
             expr = LocExpr::new_logical(expr, op, right);
@@ -436,7 +482,7 @@ impl Parser {
     fn parse_logic_or(&mut self) -> Result<LocExpr, ()> {
         let mut expr = self.parse_logic_and()?;
 
-        while self.is_next(&TokenKind::PipePipe) {
+        while self.is_next(TokenKind::PipePipe) {
             let op = self.advance().unwrap();
             let right = self.parse_logic_and()?;
             expr = LocExpr::new_logical(expr, op, right);
@@ -448,7 +494,7 @@ impl Parser {
     fn parse_assignment(&mut self) -> Result<LocExpr, ()> {
         let l_expr = self.parse_logic_or()?;
 
-        if self.try_consume(&TokenKind::Equal) {
+        if self.try_consume(TokenKind::Equal) {
             match l_expr.expr {
                 Expr::Variable(var) => {
                     let r_expr = self.parse_expr()?;
@@ -477,18 +523,18 @@ impl Parser {
 
     fn parse_expr_stmt(&mut self) -> Result<Stmt, ()> {
         let expr = self.parse_expr()?;
-        self.expect(&TokenKind::Semicolon, "Expected semicolon after the statement")?;
+        self.expect(TokenKind::Semicolon, "Expected semicolon after the statement")?;
 
         Ok(Stmt::Expr(expr))
     }
 
     fn parse_if_stmt(&mut self) -> Result<Stmt, ()> {
-        self.expect(&TokenKind::LeftParen, "Expected '(' after 'if'")?;
+        self.expect(TokenKind::LeftParen, "Expected '(' after 'if'")?;
         let condition = self.parse_expr()?;
-        self.expect(&TokenKind::RightParen, "Unclosed '(', expected ')' after the condition")?;
+        self.expect(TokenKind::RightParen, "Unclosed '(', expected ')' after the condition")?;
 
         let then_branch = Box::new(self.parse_stmt()?);
-        let else_branch = if self.try_consume(&TokenKind::Else) {
+        let else_branch = if self.try_consume(TokenKind::Else) {
             Some(Box::new(self.parse_stmt()?))
         } else {
             None
@@ -502,9 +548,9 @@ impl Parser {
     }
 
     fn parse_while_stmt(&mut self) -> Result<Stmt, ()> {
-        self.expect(&TokenKind::LeftParen, "Expected '(' after 'while'")?;
+        self.expect(TokenKind::LeftParen, "Expected '(' after 'while'")?;
         let condition = self.parse_expr()?;
-        self.expect(&TokenKind::RightParen, "Unclosed '(', expected ')' after the condition")?;
+        self.expect(TokenKind::RightParen, "Unclosed '(', expected ')' after the condition")?;
 
         let body = Box::new(self.parse_stmt()?);
 
@@ -512,32 +558,32 @@ impl Parser {
     }
 
     fn parse_for_stmt(&mut self) -> Result<Stmt, ()> {
-        self.expect(&TokenKind::LeftParen, "Expected '(' after 'for'")?;
+        self.expect(TokenKind::LeftParen, "Expected '(' after 'for'")?;
 
         let initializer;
-        if self.try_consume(&TokenKind::Semicolon) {
+        if self.try_consume(TokenKind::Semicolon) {
             initializer = None;
-        } else if self.try_consume(&TokenKind::Var) {
+        } else if self.try_consume(TokenKind::Var) {
             initializer = Some(self.parse_var_decl()?);
         } else {
             initializer = Some(self.parse_expr_stmt()?);
         }
 
         let condition;
-        if self.try_consume(&TokenKind::Semicolon) {
+        if self.try_consume(TokenKind::Semicolon) {
             // `for` without condition is infinite, so use `while (true)`.
             condition = LocExpr::new_literal(Loc::none(), Value::Bool(true));
         } else {
             condition = self.parse_expr()?;
-            self.consume(&TokenKind::Semicolon)?;
+            self.consume(TokenKind::Semicolon)?;
         }
 
         let update;
-        if self.try_consume(&TokenKind::RightParen) {
+        if self.try_consume(TokenKind::RightParen) {
             update = None;
         } else {
             update = Some(Stmt::Expr(self.parse_expr()?));
-            self.expect(&TokenKind::RightParen, "Unclosed '(', expected ')'")?;
+            self.expect(TokenKind::RightParen, "Unclosed '(', expected ')'")?;
         }
 
         let body = self.parse_stmt()?;
@@ -560,11 +606,11 @@ impl Parser {
 
     fn parse_return_stmt(&mut self) -> Result<Stmt, ()> {
         let value;
-        if self.try_consume(&TokenKind::Semicolon) {
+        if self.try_consume(TokenKind::Semicolon) {
             value = LocExpr::new_literal(self.tokens[self.index - 1].loc, Value::Null);
         } else {
             value = self.parse_expr()?;
-            self.expect(&TokenKind::Semicolon, "Expected semicolon after the return statement")?;
+            self.expect(TokenKind::Semicolon, "Expected semicolon after the return statement")?;
         }
 
         Ok(Stmt::Return(value))
@@ -573,13 +619,13 @@ impl Parser {
     fn parse_block(&mut self) -> Result<Vec<Stmt>, ()> {
         let mut stmts = Vec::new();
 
-        while !self.is_done() && !self.is_next(&TokenKind::RightBrace) {
+        while !self.is_done() && !self.is_next(TokenKind::RightBrace) {
             if let Some(stmt) = self.parse_decl() {
                 stmts.push(stmt);
             }
         }
+        self.expect(TokenKind::RightBrace, "Unclosed '{', expected '}'")?;
 
-        self.expect(&TokenKind::RightBrace, "Unclosed '{', expected '}'")?;
         Ok(stmts)
     }
 
@@ -600,57 +646,73 @@ impl Parser {
     fn parse_var_decl(&mut self) -> Result<Stmt, ()> {
         let mut init = LocExpr::new_literal(Loc::none(), Value::Null);
 
-        let name = self.consume(&TokenKind::Identifier)?;
-        if self.try_consume(&TokenKind::Equal) {
+        let name_token = self.consume(TokenKind::Identifier)?;
+        if self.try_consume(TokenKind::Equal) {
             init = self.parse_expr()?;
         }
         self.expect(
-            &TokenKind::Semicolon,
+            TokenKind::Semicolon,
             "Expected semicolon after the variable declaration",
         )?;
 
-        Ok(Stmt::VarDecl(VarDecl { name, init }))
+        Ok(Stmt::VarDecl(VarDecl {
+            name_loc: name_token.loc,
+            name: name_token.to_identifier().unwrap(),
+            init,
+        }))
     }
 
-    fn parse_params(&mut self) -> Result<Vec<Token>, ()> {
+    fn parse_param(&mut self) -> Result<LoxFunParam, ()> {
+        let param_token = self.consume(TokenKind::Identifier)?;
+        Ok(LoxFunParam {
+            loc: param_token.loc,
+            name: param_token.to_identifier().unwrap(),
+        })
+    }
+
+    fn parse_params(&mut self) -> Result<Vec<LoxFunParam>, ()> {
         let mut params = Vec::new();
 
-        if self.try_consume(&TokenKind::RightParen) {
+        if self.try_consume(TokenKind::RightParen) {
             return Ok(params);
         }
 
-        params.push(self.consume(&TokenKind::Identifier)?);
-        while params.len() < Self::MAX_ARGS && self.try_consume(&TokenKind::Comma) {
-            params.push(self.consume(&TokenKind::Identifier)?);
+        params.push(self.parse_param()?);
+        while params.len() < Self::MAX_ARGS && self.try_consume(TokenKind::Comma) {
+            params.push(self.parse_param()?);
         }
-        if self.is_next(&TokenKind::Comma) {
+        if self.is_next(TokenKind::Comma) {
             self.had_error = true;
             print_error(
                 self.tokens[self.index + 1].loc,
-                &format!("Max number of arguments is {}", Self::MAX_ARGS),
+                &format!("Max number of parameters is {}", Self::MAX_ARGS),
             );
         }
-        self.expect(
-            &TokenKind::RightParen,
-            "Unclosed '(', expected ')' after the parameters",
-        )?;
+        self.expect(TokenKind::RightParen, "Unclosed '(', expected ')' after the parameters")?;
 
         Ok(params)
     }
 
-    fn parse_fun_decl(&mut self) -> Result<Stmt, ()> {
-        let name = self.consume(&TokenKind::Identifier)?;
+    fn parse_fun(&mut self) -> Result<FunDecl, ()> {
+        let name_token = self.consume(TokenKind::Identifier)?;
 
-        self.expect(&TokenKind::LeftParen, "Expected '(' after function name")?;
+        self.expect(TokenKind::LeftParen, "Expected '(' after function name")?;
         let params = self.parse_params()?;
 
-        self.expect(&TokenKind::LeftBrace, "Expected '{' after function parameters")?;
+        self.expect(TokenKind::LeftBrace, "Expected '{' before function body")?;
         let body = self.parse_block()?;
 
-        Ok(Stmt::FunDecl(FunDecl {
-            name,
+        Ok(FunDecl {
+            name_loc: name_token.loc,
+            name: name_token.to_identifier().unwrap(),
             decl: Rc::new(LoxFunDecl { params, body }),
-        }))
+        })
+    }
+
+    fn parse_fun_decl(&mut self) -> Result<Stmt, ()> {
+        Ok(Stmt::FunDecl(self.parse_fun()?))
+    }
+
     }
 
     fn parse_decl(&mut self) -> Option<Stmt> {
@@ -687,9 +749,9 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, ()> {
         }
     }
 
-    if !parser.had_error {
-        Ok(stmts)
-    } else {
+    if parser.had_error {
         Err(())
+    } else {
+        Ok(stmts)
     }
 }

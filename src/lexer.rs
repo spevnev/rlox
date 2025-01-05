@@ -5,7 +5,7 @@ use crate::{
     interpreter::Function,
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
     // One or two character tokens
     LeftParen,
@@ -157,29 +157,6 @@ pub struct Token {
     pub len: usize,
 }
 
-impl Token {
-    fn to_error_string(&self) -> String {
-        match self.kind {
-            TokenKind::Number | TokenKind::String | TokenKind::Identifier => self.value.convert_to_string(true),
-            _ => self.kind.to_string().to_owned(),
-        }
-    }
-
-    fn type_expected_error<T>(&self, expected: &str) -> Result<T, ()> {
-        error(
-            self.loc,
-            &format!("Expected {expected} but found '{}'", self.to_error_string()),
-        )
-    }
-
-    pub fn to_identifier(&self) -> Result<String, ()> {
-        match &self.value {
-            Value::Identifier(id) => Ok(id.clone()),
-            _ => self.type_expected_error("identifier"),
-        }
-    }
-}
-
 struct Lexer {
     source: Vec<char>,
     index: usize,
@@ -246,7 +223,7 @@ impl Lexer {
 pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
     let mut lexer = Lexer::new(source);
     let mut tokens: Vec<Token> = Vec::new();
-    let mut has_error = false;
+    let mut had_error = false;
 
     while !lexer.is_done() {
         let start = lexer.index;
@@ -315,7 +292,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                     TokenKind::AndAnd
                 } else {
                     print_error(loc, "Lox doesn't have bitwise operators");
-                    has_error = true;
+                    had_error = true;
                     continue;
                 }
             },
@@ -324,7 +301,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                     TokenKind::PipePipe
                 } else {
                     print_error(loc, "Lox doesn't have bitwise operators");
-                    has_error = true;
+                    had_error = true;
                     continue;
                 }
             },
@@ -385,13 +362,13 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                         loc,
                         &format!("Unable to parse number '{}'", &source[start..lexer.index]),
                     );
-                    has_error = true;
+                    had_error = true;
                     continue;
                 }
             },
             c => {
                 print_error(loc, &format!("Unknown character '{c}'"));
-                has_error = true;
+                had_error = true;
                 continue;
             },
         };
@@ -404,9 +381,9 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
         });
     }
 
-    if !has_error {
-        Ok(tokens)
-    } else {
+    if had_error {
         Err(())
+    } else {
+        Ok(tokens)
     }
 }

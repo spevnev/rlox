@@ -4,18 +4,18 @@ use crate::{
     error::{print_error, Loc},
     lexer::{Callable, TokenKind, Value},
     native::get_native_functions_as_symbols,
-    parser::{Binary, Call, Expr, FunDecl, If, LocExpr, LoxFunDecl, Stmt, Unary, Var, VarDecl, While},
+    parser::{Binary, Call, Expr, FunDecl, If, LocExpr, LoxFunDecl, Stmt, Unary, Var, VarDecl, VarScope, While},
 };
 
 pub enum Error {
     MismatchingType,
-    SymbolRedefinition,
+    SymbolRedeclaration,
     UndefinedSymbol,
     DivisionByZero,
     WrongArity,
 
     // The following aren't actual errors, and are used to quickly return from a deeply nested call:
-    Return(Loc, Value),
+    Return(Value),
 }
 
 type Result<V, E = Error> = std::result::Result<V, E>;
@@ -103,8 +103,8 @@ impl Scope {
             self.symbols.insert(name, value);
             Ok(())
         } else {
-            print_error(loc, &format!("Redefinition of symbol '{}'", name));
-            Err(Error::SymbolRedefinition)
+            print_error(loc, &format!("Redeclaration of symbol '{}'", name));
+            Err(Error::SymbolRedeclaration)
         }
     }
 
@@ -121,9 +121,9 @@ impl Scope {
         if depth == 0 {
             self.get_symbol(loc, name)
         } else if let Some(parent) = &self.parent {
-            RefCell::borrow(parent).get_symbol_at(loc, name, depth - 1)
+            parent.borrow().get_symbol_at(loc, name, depth - 1)
         } else {
-            todo!()
+            panic!("Scope has no parent.");
         }
     }
 
@@ -136,16 +136,16 @@ impl Scope {
             Err(Error::UndefinedSymbol)
         }
     }
+
     fn set_var_at(&mut self, loc: Loc, name: &str, value: Value, depth: i32) -> Result<()> {
         if depth == 0 {
             self.set_var(loc, name, value)
         } else if let Some(parent) = &self.parent {
-            RefCell::borrow_mut(parent).set_var_at(loc, name, value, depth - 1)
+            parent.borrow_mut().set_var_at(loc, name, value, depth - 1)
         } else {
-            todo!()
+            panic!("Scope has no parent.");
         }
     }
-
 }
 
 pub struct Interpreter {
@@ -163,24 +163,20 @@ impl Interpreter {
     }
 
     fn define_symbol(&self, loc: Loc, name: String, value: Value) -> Result<()> {
-        RefCell::borrow_mut(&self.scope).define_symbol(loc, name, value)
+        self.scope.borrow_mut().define_symbol(loc, name, value)
     }
 
     fn get_symbol(&self, loc: Loc, var: &Var) -> Result<Value> {
-        let depth = *RefCell::borrow(&var.depth);
-        if depth == -1 {
-            RefCell::borrow(&self.global).get_symbol(loc, &var.name)
-        } else {
-            RefCell::borrow(&self.scope).get_symbol_at(loc, &var.name, depth)
+        match var.scope.get() {
+            VarScope::Global => self.global.borrow().get_symbol(loc, &var.name),
+            VarScope::Relative(depth) => self.scope.borrow().get_symbol_at(loc, &var.name, depth),
         }
     }
 
     fn set_var(&mut self, loc: Loc, var: &Var, value: Value) -> Result<()> {
-        let depth = *RefCell::borrow(&var.depth);
-        if depth == -1 {
-            RefCell::borrow_mut(&self.global).set_var(loc, &var.name, value)
-        } else {
-            RefCell::borrow_mut(&self.scope).set_var_at(loc, &var.name, value, depth)
+        match var.scope.get() {
+            VarScope::Global => self.global.borrow_mut().set_var(loc, &var.name, value),
+            VarScope::Relative(depth) => self.scope.borrow_mut().set_var_at(loc, &var.name, value, depth),
         }
     }
 
@@ -293,14 +289,12 @@ impl Interpreter {
                 let prev_scope = mem::replace(&mut self.scope, new_scope);
 
                 assert!(decl.params.len() == call.args.len());
-                for (param_token, arg) in decl.params.iter().zip(call.args.iter()) {
-                    let value = self.eval_expr(arg)?;
-                    let param = param_token.to_identifier().expect("Parameter name must be an identifier.");
-                    self.define_symbol(param_token.loc, param, value)?;
+                for (param, arg) in decl.params.iter().zip(arg_values.into_iter()) {
+                    self.define_symbol(param.loc, param.name.clone(), arg)?;
                 }
 
                 let result = match self.eval_stmts(&decl.body) {
-                    Err(Error::Return(_, value)) => Ok(value),
+                    Err(Error::Return(value)) => Ok(value),
                     Ok(_) => Ok(Value::Null),
                     Err(err) => Err(err),
                 };
@@ -338,7 +332,7 @@ impl Interpreter {
 
                 for stmt in stmts {
                     if let Err(err) = self.eval_stmt(stmt) {
-                        // Pop the scope on error and propagate it
+                        // Pop the scope on error and propagate it.
                         self.scope = prev_scope;
                         return Err(err);
                     }
@@ -363,19 +357,11 @@ impl Interpreter {
                     self.eval_stmt(body)?;
                 }
             },
-            Stmt::VarDecl(VarDecl {
-                name: name_token,
-                init,
-            }) => {
-                let name = name_token.to_identifier().expect("Variable name must be an identifier.");
+            Stmt::VarDecl(VarDecl { name_loc, name, init }) => {
                 let value = self.eval_expr(init)?;
-                self.define_symbol(name_token.loc, name, value)?;
+                self.define_symbol(*name_loc, name.clone(), value)?;
             },
-            Stmt::FunDecl(FunDecl {
-                name: name_token,
-                decl,
-            }) => {
-                let name = name_token.to_identifier().expect("Function name must be an identifier.");
+            Stmt::FunDecl(FunDecl { name_loc, name, decl }) => {
                 let callable = Value::Callable(Rc::new(Callable {
                     name: name.clone(),
                     arity: decl.params.len(),
@@ -384,11 +370,11 @@ impl Interpreter {
                         closure: self.scope.clone(),
                     }),
                 }));
-                self.define_symbol(name_token.loc, name, callable)?;
+                self.define_symbol(*name_loc, name.clone(), callable)?;
             },
             Stmt::Return(expr) => {
                 let value = self.eval_expr(expr)?;
-                return Err(Error::Return(expr.loc, value));
+                return Err(Error::Return(value));
             },
         };
 
@@ -405,7 +391,7 @@ impl Interpreter {
 
     pub fn eval(&mut self, stmts: &Vec<Stmt>) -> Result<()> {
         match self.eval_stmts(stmts) {
-            Err(Error::Return(loc, _)) => print_error(loc, "Return outside of function"),
+            Err(Error::Return(_)) => panic!("Return outside of function."),
             Err(err) => return Err(err),
             Ok(_) => {},
         };

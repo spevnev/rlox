@@ -1,16 +1,26 @@
-use std::{cell::RefCell, collections::HashSet};
+use std::collections::HashMap;
 
 use crate::{
     error::{print_error, Loc},
-    parser::{Assign, Binary, Call, Expr, FunDecl, If, LocExpr, Stmt, Var, VarDecl, While},
+    parser::{Assign, Binary, Call, Expr, FunDecl, If, LocExpr, Stmt, Var, VarDecl, VarScope, While},
 };
+
+#[derive(PartialEq)]
+enum VarState {
+    // Declared means that the name is taken, but usage is invalid.
+    Declared,
+    Defined,
+}
 
 struct Resolver {
     had_error: bool,
     function_count: i32,
-    scopes: Vec<HashSet<String>>,
+    scopes: Vec<HashMap<String, VarState>>,
 }
 
+/// Resolver binds local variables to specific instances by settings their `scope`.
+/// Global variables are resolved at runtime since it is valid to declare them after
+/// they are used by a function, provided that the declaration is evaluated before it.
 impl Resolver {
     fn new() -> Self {
         Self {
@@ -21,19 +31,42 @@ impl Resolver {
     }
 
     fn declare(&mut self, loc: Loc, name: &str) {
-        if let Some(scope) = self.scopes.last_mut() {
-            if scope.insert(name.to_owned()) == false {
-                self.had_error = true;
-                print_error(loc, &format!("Redefinition of symbol '{}'", name));
-            }
+        let Some(scope) = self.scopes.last_mut() else {
+            return;
+        };
+
+        if scope.insert(name.to_owned(), VarState::Declared).is_some() {
+            self.had_error = true;
+            print_error(loc, &format!("Redeclaration of symbol '{}'", name));
         }
     }
 
-    fn resolve_var(&mut self, var: &Var) {
-        let mut depth = 0; // TODO: rename?
+    fn define(&mut self, loc: Loc, name: &str) {
+        let Some(scope) = self.scopes.last_mut() else {
+            return;
+        };
+
+        if scope
+            .insert(name.to_owned(), VarState::Defined)
+            // Define is valid only if it is `None` or `Declared`.
+            .is_some_and(|state| state == VarState::Defined)
+        {
+            self.had_error = true;
+            print_error(loc, &format!("Redefinition of symbol '{}'", name));
+        }
+    }
+
+    fn resolve_var(&mut self, loc: Loc, var: &Var) {
+        let mut depth = 0;
         for scope in self.scopes.iter().rev() {
-            if scope.contains(&var.name) {
-                *RefCell::borrow_mut(&var.depth) = depth;
+            if let Some(state) = scope.get(&var.name) {
+                match state {
+                    VarState::Declared => {
+                        self.had_error = true;
+                        print_error(loc, "Can't read variable in its own initializer");
+                    },
+                    VarState::Defined => var.scope.set(VarScope::Relative(depth)),
+                }
                 return;
             }
             depth += 1;
@@ -48,10 +81,10 @@ impl Resolver {
                 self.resolve_expr(left);
                 self.resolve_expr(right);
             },
-            Expr::Variable(var) => self.resolve_var(var),
+            Expr::Variable(var) => self.resolve_var(expr.loc, var),
             Expr::Assign(Assign { var, expr }) => {
-                self.resolve_var(var);
                 self.resolve_expr(expr);
+                self.resolve_var(expr.loc, var);
             },
             Expr::Call(Call { callee, args }) => {
                 self.resolve_expr(callee);
@@ -66,7 +99,7 @@ impl Resolver {
         match stmt {
             Stmt::Expr(expr) => self.resolve_expr(expr),
             Stmt::Block(stmts) => {
-                self.scopes.push(HashSet::new());
+                self.scopes.push(HashMap::new());
                 for stmt in stmts {
                     self.resolve_stmt(stmt);
                 }
@@ -87,18 +120,20 @@ impl Resolver {
                 self.resolve_expr(condition);
                 self.resolve_stmt(body);
             },
-            Stmt::VarDecl(VarDecl { name, init }) => {
-                // Resolve `init` before declaring the variable so that if it
-                // uses variable with name `name` it resolves to the outer one.
+            Stmt::VarDecl(VarDecl { name_loc, name, init }) => {
+                // Declaring before resolving `init` expr allows to throw an error
+                // if it uses a variable with the same name as one being defined.
+                self.declare(*name_loc, name);
                 self.resolve_expr(init);
-                self.declare(name.loc, &name.to_identifier().unwrap());
+                self.define(*name_loc, name);
             },
-            Stmt::FunDecl(FunDecl { name, decl }) => {
-                self.declare(name.loc, &name.to_identifier().unwrap());
+            Stmt::FunDecl(FunDecl { name_loc, name, decl }) => {
+                self.define(*name_loc, name);
 
-                self.scopes.push(HashSet::new());
+                self.scopes.push(HashMap::new());
+
                 for param in &decl.params {
-                    self.declare(param.loc, &param.to_identifier().unwrap());
+                    self.define(param.loc, &param.name);
                 }
 
                 self.function_count += 1;
@@ -119,6 +154,7 @@ impl Resolver {
         }
     }
 }
+
 pub fn resolve(stmts: &Vec<Stmt>) -> Result<(), ()> {
     let mut resolver = Resolver::new();
 
@@ -126,9 +162,9 @@ pub fn resolve(stmts: &Vec<Stmt>) -> Result<(), ()> {
         resolver.resolve_stmt(stmt);
     }
 
-    if !resolver.had_error {
-        Ok(())
-    } else {
+    if resolver.had_error {
         Err(())
+    } else {
+        Ok(())
     }
 }
