@@ -1,8 +1,9 @@
-use std::rc::Rc;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     error::{error, print_error, Loc},
     interpreter::Function,
+    parser::ClassDecl,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -119,6 +120,31 @@ pub struct Callable {
     pub fun: Function,
 }
 
+#[derive(Clone)]
+pub struct Class {
+    pub decl: Rc<ClassDecl>,                    // TODO: why Rc?
+    pub methods: HashMap<String, Rc<Callable>>, // TODO: why Rc?
+    pub constructor: Rc<Callable>,              // TODO: why Rc?
+}
+
+impl PartialEq for Class {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.constructor, &other.constructor) && Rc::ptr_eq(&self.decl, &other.decl)
+    }
+}
+
+#[derive(Clone)]
+pub struct Instance {
+    pub class: Rc<Class>, // TODO: why Rc?
+    pub fields: RefCell<HashMap<String, Value>>,
+}
+
+impl PartialEq for Instance {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.class, &other.class)
+    }
+}
+
 #[derive(PartialEq, Clone)]
 pub enum Value {
     Number(f64),
@@ -126,7 +152,9 @@ pub enum Value {
     Identifier(String),
     Bool(bool),
     Null,
-    Callable(Rc<Callable>),
+    Callable(Rc<Callable>), // TODO: why Rc?
+    Class(Rc<Class>),       // TODO: why Rc?
+    Instance(Rc<Instance>),
 }
 
 impl Value {
@@ -145,6 +173,8 @@ impl Value {
             Value::Bool(bool) => bool.to_string(),
             Value::Null => "null".to_owned(),
             Value::Callable(callable) => format!("<fun {}>", callable.name),
+            Value::Class(class) => class.decl.name.clone(),
+            Value::Instance(instance) => format!("<instance of {}>", instance.class.decl.name),
         }
     }
 }

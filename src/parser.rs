@@ -71,6 +71,17 @@ pub struct Call {
     pub args: Vec<LocExpr>,
 }
 
+pub struct Get {
+    pub object: Box<LocExpr>,
+    pub property: String,
+}
+
+pub struct Set {
+    pub object: Box<LocExpr>,
+    pub property: String,
+    pub expr: Box<LocExpr>,
+}
+
 pub enum Expr {
     Literal(Value),
     Unary(Unary),
@@ -79,6 +90,8 @@ pub enum Expr {
     Variable(Var),
     Assign(Assign),
     Call(Call),
+    Get(Get),
+    Set(Set),
 }
 
 pub struct LocExpr {
@@ -152,6 +165,27 @@ impl LocExpr {
             }),
         }
     }
+
+    fn new_get(object: Self, property: Token) -> Self {
+        Self {
+            loc: property.loc,
+            expr: Expr::Get(Get {
+                object: Box::new(object),
+                property: property.to_identifier().unwrap(),
+            }),
+        }
+    }
+
+    fn new_set(get: Get, expr: Self) -> Self {
+        Self {
+            loc: get.object.loc,
+            expr: Expr::Set(Set {
+                object: get.object,
+                property: get.property,
+                expr: Box::new(expr),
+            }),
+        }
+    }
 }
 
 pub struct LoxFunParam {
@@ -187,6 +221,12 @@ pub struct FunDecl {
     pub decl: Rc<LoxFunDecl>,
 }
 
+pub struct ClassDecl {
+    pub name_loc: Loc,
+    pub name: String,
+    pub methods: Vec<FunDecl>,
+}
+
 pub enum Stmt {
     Expr(LocExpr),
     Block(Vec<Stmt>),
@@ -195,6 +235,7 @@ pub enum Stmt {
     VarDecl(VarDecl),
     FunDecl(FunDecl),
     Return(LocExpr),
+    ClassDecl(Rc<ClassDecl>), // TODO: why Rc?
 }
 
 struct Parser {
@@ -394,6 +435,10 @@ impl Parser {
                 TokenKind::LeftParen => {
                     expr = LocExpr::new_call(expr, self.parse_args()?);
                 },
+                TokenKind::Dot => {
+                    let property = self.consume(TokenKind::Identifier)?;
+                    expr = LocExpr::new_get(expr, property);
+                },
                 _ => {
                     self.back();
                     break;
@@ -499,6 +544,10 @@ impl Parser {
                 Expr::Variable(var) => {
                     let r_expr = self.parse_expr()?;
                     Ok(LocExpr::new_assign(l_expr.loc, var.name, r_expr))
+                },
+                Expr::Get(get) => {
+                    let r_expr = self.parse_expr()?;
+                    Ok(LocExpr::new_set(get, r_expr))
                 },
                 _ => {
                     // Parser is still in a valid state that doesn't require syncing.
@@ -713,12 +762,28 @@ impl Parser {
         Ok(Stmt::FunDecl(self.parse_fun()?))
     }
 
+    fn parse_class_decl(&mut self) -> Result<Stmt, ()> {
+        let name_token = self.consume(TokenKind::Identifier)?;
+
+        self.expect(TokenKind::LeftBrace, "Expected '{' before class body")?;
+        let mut methods = Vec::new();
+        while !self.is_done() && !self.is_next(TokenKind::RightBrace) {
+            methods.push(self.parse_fun()?);
+        }
+        self.expect(TokenKind::RightBrace, "Unclosed '{', expected '}' after class body")?;
+
+        Ok(Stmt::ClassDecl(Rc::new(ClassDecl {
+            name_loc: name_token.loc,
+            name: name_token.to_identifier().unwrap(),
+            methods,
+        })))
     }
 
     fn parse_decl(&mut self) -> Option<Stmt> {
         let result = match self.advance().unwrap().kind {
             TokenKind::Var => self.parse_var_decl(),
             TokenKind::Fun => self.parse_fun_decl(),
+            TokenKind::Class => self.parse_class_decl(),
             _ => {
                 self.back();
                 self.parse_stmt()

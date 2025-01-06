@@ -92,7 +92,30 @@ impl Resolver {
                     self.resolve_expr(arg);
                 }
             },
+            Expr::Get(get) => self.resolve_expr(&get.object),
+            Expr::Set(set) => {
+                self.resolve_expr(&set.expr);
+                self.resolve_expr(&set.object);
+            },
         }
+    }
+
+    fn resolve_fun(&mut self, FunDecl { name_loc, name, decl }: &FunDecl) {
+        self.define(*name_loc, name);
+
+        self.scopes.push(HashMap::new());
+
+        for param in &decl.params {
+            self.define(param.loc, &param.name);
+        }
+
+        self.function_count += 1;
+        for stmt in &decl.body {
+            self.resolve_stmt(stmt);
+        }
+        self.function_count -= 1;
+
+        self.scopes.pop();
     }
 
     fn resolve_stmt(&mut self, stmt: &Stmt) {
@@ -127,29 +150,19 @@ impl Resolver {
                 self.resolve_expr(init);
                 self.define(*name_loc, name);
             },
-            Stmt::FunDecl(FunDecl { name_loc, name, decl }) => {
-                self.define(*name_loc, name);
-
-                self.scopes.push(HashMap::new());
-
-                for param in &decl.params {
-                    self.define(param.loc, &param.name);
-                }
-
-                self.function_count += 1;
-                for stmt in &decl.body {
-                    self.resolve_stmt(stmt);
-                }
-                self.function_count -= 1;
-
-                self.scopes.pop();
-            },
+            Stmt::FunDecl(decl) => self.resolve_fun(decl),
             Stmt::Return(expr) => {
                 if self.function_count == 0 {
                     self.had_error = true;
                     print_error(expr.loc, "Return outside of function");
                 }
                 self.resolve_expr(expr);
+            },
+            Stmt::ClassDecl(decl) => {
+                self.define(decl.name_loc, &decl.name);
+                for method in &decl.methods {
+                    self.resolve_fun(method);
+                }
             },
         }
     }

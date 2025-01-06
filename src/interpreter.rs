@@ -1,10 +1,17 @@
-use std::{cell::RefCell, collections::HashMap, mem, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    mem,
+    rc::{Rc, Weak},
+};
 
 use crate::{
     error::{print_error, Loc},
-    lexer::{Callable, TokenKind, Value},
+    lexer::{Callable, Class, Instance, TokenKind, Value},
     native::get_native_functions_as_symbols,
-    parser::{Binary, Call, Expr, FunDecl, If, LocExpr, LoxFunDecl, Stmt, Unary, Var, VarDecl, VarScope, While},
+    parser::{
+        Binary, Call, Expr, FunDecl, Get, If, LocExpr, LoxFunDecl, Set, Stmt, Unary, Var, VarDecl, VarScope, While,
+    },
 };
 
 pub enum Error {
@@ -20,6 +27,23 @@ pub enum Error {
 
 type Result<V, E = Error> = std::result::Result<V, E>;
 
+impl Instance {
+    fn get(&self, loc: Loc, property: &str) -> Result<Value> {
+        if let Some(value) = self.fields.borrow().get(property) {
+            Ok(value.clone())
+        } else if let Some(method) = self.class.methods.get(property) {
+            Ok(Value::Callable(method.clone()))
+        } else {
+            print_error(loc, &format!("Undefined property '{}'", property));
+            Err(Error::UndefinedSymbol)
+        }
+    }
+
+    fn set(&self, property: String, value: Value) {
+        self.fields.borrow_mut().insert(property, value);
+    }
+}
+
 pub type NativeFun = fn(Vec<Value>) -> Value;
 
 pub struct LoxFun {
@@ -33,10 +57,21 @@ impl PartialEq for LoxFun {
     }
 }
 
+pub struct Constructor {
+    class: Weak<Class>,
+}
+
+impl PartialEq for Constructor {
+    fn eq(&self, other: &Self) -> bool {
+        Weak::ptr_eq(&self.class, &other.class)
+    }
+}
+
 #[derive(PartialEq)]
 pub enum Function {
     Native(NativeFun),
     Lox(LoxFun),
+    Constructor(Constructor), // TODO: shorter name?
 }
 
 impl Value {
@@ -73,7 +108,15 @@ impl Value {
     fn to_callable(&self, loc: Loc) -> Result<&Callable> {
         match self {
             Value::Callable(callable) => Ok(callable),
+            Value::Class(class) => Ok(&class.constructor),
             _ => self.type_expected_error(loc, "function or constructor"),
+        }
+    }
+
+    fn to_instance(&self, loc: Loc) -> Result<&Instance> {
+        match self {
+            Value::Instance(instance) => Ok(instance),
+            _ => self.type_expected_error(loc, "instance"),
         }
     }
 }
@@ -302,7 +345,28 @@ impl Interpreter {
                 self.scope = prev_scope;
                 result
             },
+            Function::Constructor(constructor) => Ok(Value::Instance(Rc::new(Instance {
+                class: constructor.class.upgrade().unwrap(), // TODO: is unwrapping ok?
+                fields: RefCell::new(HashMap::new()),
+            }))),
         }
+    }
+
+    fn eval_get(&mut self, get: &Get) -> Result<Value> {
+        let value = self.eval_expr(&get.object)?;
+        let instance = value.to_instance(get.object.loc)?;
+        let property = instance.get(get.object.loc, &get.property)?;
+        Ok(property.clone())
+    }
+
+    fn eval_set(&mut self, set: &Set) -> Result<Value> {
+        let value = self.eval_expr(&set.object)?;
+        let instance = value.to_instance(set.object.loc)?;
+
+        let set_value = self.eval_expr(&set.expr)?;
+        instance.set(set.property.clone(), set_value.clone());
+
+        Ok(set_value)
     }
 
     fn eval_expr(&mut self, expr: &LocExpr) -> Result<Value> {
@@ -318,7 +382,20 @@ impl Interpreter {
                 Ok(value)
             },
             Expr::Call(call) => self.eval_call(call),
+            Expr::Get(get) => self.eval_get(get),
+            Expr::Set(set) => self.eval_set(set),
         }
+    }
+
+    fn fun_to_callable(&self, fun: &FunDecl) -> Rc<Callable> {
+        Rc::new(Callable {
+            name: fun.name.clone(),
+            arity: fun.decl.params.len(),
+            fun: Function::Lox(LoxFun {
+                decl: fun.decl.clone(),
+                closure: self.scope.clone(),
+            }),
+        })
     }
 
     fn eval_stmt(&mut self, stmt: &Stmt) -> Result<()> {
@@ -361,20 +438,31 @@ impl Interpreter {
                 let value = self.eval_expr(init)?;
                 self.define_symbol(*name_loc, name.clone(), value)?;
             },
-            Stmt::FunDecl(FunDecl { name_loc, name, decl }) => {
-                let callable = Value::Callable(Rc::new(Callable {
-                    name: name.clone(),
-                    arity: decl.params.len(),
-                    fun: Function::Lox(LoxFun {
-                        decl: decl.clone(),
-                        closure: self.scope.clone(),
-                    }),
-                }));
-                self.define_symbol(*name_loc, name.clone(), callable)?;
+            Stmt::FunDecl(fun) => {
+                let value = Value::Callable(self.fun_to_callable(fun));
+                self.define_symbol(fun.name_loc, fun.name.clone(), value)?;
             },
             Stmt::Return(expr) => {
                 let value = self.eval_expr(expr)?;
                 return Err(Error::Return(value));
+            },
+            Stmt::ClassDecl(decl) => {
+                let mut methods = HashMap::new();
+                for method in &decl.methods {
+                    let value = self.fun_to_callable(method);
+                    methods.insert(method.name.clone(), value);
+                }
+
+                let class = Value::Class(Rc::new_cyclic(|s| Class {
+                    decl: decl.clone(),
+                    methods,
+                    constructor: Rc::new(Callable {
+                        name: decl.name.clone(),
+                        arity: 0,
+                        fun: Function::Constructor(Constructor { class: s.clone() }),
+                    }),
+                }));
+                self.define_symbol(decl.name_loc, decl.name.clone(), class)?;
             },
         };
 
