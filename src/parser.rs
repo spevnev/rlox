@@ -92,6 +92,7 @@ pub enum Expr {
     Call(Call),
     Get(Get),
     Set(Set),
+    This(Var),
 }
 
 pub struct LocExpr {
@@ -186,6 +187,13 @@ impl LocExpr {
             }),
         }
     }
+
+    fn new_this(loc: Loc) -> Self {
+        Self {
+            loc,
+            expr: Expr::This(Var::new("this".to_owned())),
+        }
+    }
 }
 
 pub struct LoxFunParam {
@@ -221,6 +229,11 @@ pub struct FunDecl {
     pub decl: Rc<LoxFunDecl>,
 }
 
+pub struct Return {
+    pub loc: Loc,
+    pub expr: Option<LocExpr>,
+}
+
 pub struct ClassDecl {
     pub name_loc: Loc,
     pub name: String,
@@ -234,7 +247,7 @@ pub enum Stmt {
     While(While),
     VarDecl(VarDecl),
     FunDecl(FunDecl),
-    Return(LocExpr),
+    Return(Return),
     ClassDecl(Rc<ClassDecl>), // TODO: why Rc?
 }
 
@@ -395,6 +408,7 @@ impl Parser {
             TokenKind::True => Ok(LocExpr::new_literal(token.loc, Value::Bool(true))),
             TokenKind::Null => Ok(LocExpr::new_literal(token.loc, Value::Null)),
             TokenKind::Identifier => Ok(LocExpr::new_var(token.loc, token.to_identifier()?)),
+            TokenKind::This => Ok(LocExpr::new_this(token.loc)),
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
                 self.expect(TokenKind::RightParen, "Unclosed '(', expected ')'")?;
@@ -654,15 +668,17 @@ impl Parser {
     }
 
     fn parse_return_stmt(&mut self) -> Result<Stmt, ()> {
-        let value;
+        let loc = self.tokens[self.index - 1].loc;
         if self.try_consume(TokenKind::Semicolon) {
-            value = LocExpr::new_literal(self.tokens[self.index - 1].loc, Value::Null);
+            Ok(Stmt::Return(Return { loc, expr: None }))
         } else {
-            value = self.parse_expr()?;
+            let expr = self.parse_expr()?;
             self.expect(TokenKind::Semicolon, "Expected semicolon after the return statement")?;
+            Ok(Stmt::Return(Return {
+                loc,
+                expr: Some(expr),
+            }))
         }
-
-        Ok(Stmt::Return(value))
     }
 
     fn parse_block(&mut self) -> Result<Vec<Stmt>, ()> {

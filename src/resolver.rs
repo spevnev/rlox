@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     error::{print_error, Loc},
-    parser::{Assign, Binary, Call, Expr, FunDecl, If, LocExpr, Stmt, Var, VarDecl, VarScope, While},
+    parser::{Assign, Binary, Call, Expr, FunDecl, If, LocExpr, Return, Stmt, Var, VarDecl, VarScope, While},
 };
 
 #[derive(PartialEq)]
@@ -12,20 +12,36 @@ enum VarState {
     Defined,
 }
 
+#[derive(PartialEq, Clone, Copy)]
+enum FunType {
+    None,
+    Function,
+    Constructor,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum ClassType {
+    None,
+    Class,
+}
+
 struct Resolver {
     had_error: bool,
-    function_count: i32,
+    current_fun: FunType,
+    current_class: ClassType,
     scopes: Vec<HashMap<String, VarState>>,
 }
 
 /// Resolver binds local variables to specific instances by settings their `scope`.
 /// Global variables are resolved at runtime since it is valid to declare them after
 /// they are used by a function, provided that the declaration is evaluated before it.
+/// Additionally, it validates usage of `return` and `this`.
 impl Resolver {
     fn new() -> Self {
         Self {
             had_error: false,
-            function_count: 0,
+            current_fun: FunType::None,
+            current_class: ClassType::None,
             scopes: Vec::new(),
         }
     }
@@ -97,10 +113,18 @@ impl Resolver {
                 self.resolve_expr(&set.expr);
                 self.resolve_expr(&set.object);
             },
+            Expr::This(var) => {
+                if self.current_class == ClassType::None {
+                    self.had_error = true;
+                    print_error(expr.loc, "'this' outside of class");
+                }
+
+                self.resolve_var(expr.loc, var);
+            },
         }
     }
 
-    fn resolve_fun(&mut self, FunDecl { name_loc, name, decl }: &FunDecl) {
+    fn resolve_fun(&mut self, FunDecl { name_loc, name, decl }: &FunDecl, fun_type: FunType) {
         self.define(*name_loc, name);
 
         self.scopes.push(HashMap::new());
@@ -109,11 +133,12 @@ impl Resolver {
             self.define(param.loc, &param.name);
         }
 
-        self.function_count += 1;
+        let prev_fun = self.current_fun;
+        self.current_fun = fun_type;
         for stmt in &decl.body {
             self.resolve_stmt(stmt);
         }
-        self.function_count -= 1;
+        self.current_fun = prev_fun;
 
         self.scopes.pop();
     }
@@ -150,19 +175,40 @@ impl Resolver {
                 self.resolve_expr(init);
                 self.define(*name_loc, name);
             },
-            Stmt::FunDecl(decl) => self.resolve_fun(decl),
-            Stmt::Return(expr) => {
-                if self.function_count == 0 {
+            Stmt::FunDecl(decl) => self.resolve_fun(decl, FunType::Function),
+            Stmt::Return(Return { loc, expr }) => {
+                if self.current_fun == FunType::None {
                     self.had_error = true;
-                    print_error(expr.loc, "Return outside of function");
+                    print_error(*loc, "Return outside of function");
                 }
-                self.resolve_expr(expr);
+
+                if let Some(expr) = expr {
+                    if self.current_fun == FunType::Constructor {
+                        self.had_error = true;
+                        print_error(expr.loc, "Can't return value from initializer ('init' method)");
+                    }
+                    self.resolve_expr(expr);
+                }
             },
             Stmt::ClassDecl(decl) => {
                 self.define(decl.name_loc, &decl.name);
+
+                self.scopes.push(HashMap::new());
+                self.define(Loc::none(), "this");
+
+                let prev_class = self.current_class;
+                self.current_class = ClassType::Class;
                 for method in &decl.methods {
-                    self.resolve_fun(method);
+                    let fun_type = if method.name == "init" {
+                        FunType::Constructor
+                    } else {
+                        FunType::Function
+                    };
+                    self.resolve_fun(method, fun_type);
                 }
+                self.current_class = prev_class;
+
+                self.scopes.pop();
             },
         }
     }
