@@ -1,4 +1,5 @@
 chain_width = 80
+fn_call_width = 80
 match_block_trailing_comma = true
 max_width = 120
 single_line_if_else_max_width = 60

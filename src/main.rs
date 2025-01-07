@@ -15,6 +15,7 @@ mod lexer;
 mod native;
 mod parser;
 mod resolver;
+mod value;
 
 fn run_repl() -> ExitCode {
     let mut interpreter = Interpreter::new();

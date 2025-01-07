@@ -1,19 +1,13 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    fmt::Debug,
-    mem,
-    rc::{Rc, Weak},
-};
+use std::{cell::RefCell, collections::HashMap, fmt::Debug, mem, rc::Rc};
 
 use crate::{
     error::{print_error, Loc},
-    lexer::{Callable, Class, Instance, TokenKind, Value},
+    lexer::TokenKind,
     native::get_native_functions_as_symbols,
     parser::{
-        Binary, Call, Expr, FunDecl, Get, If, LocExpr, LoxFunDecl, Return, Set, Stmt, Unary, Var, VarDecl, VarScope,
-        While,
+        Binary, Call, Expr, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Unary, Var, VarDecl, VarScope, While,
     },
+    value::{Callable, Class, Constructor, Function, LoxFun, Object, Value},
 };
 
 pub enum Error {
@@ -27,6 +21,7 @@ pub enum Error {
     Return(Value),
 }
 
+/// Debug trait is required in order to panic.
 impl Debug for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -35,7 +30,7 @@ impl Debug for Error {
             Self::UndefinedSymbol => write!(f, "UndefinedSymbol"),
             Self::DivisionByZero => write!(f, "DivisionByZero"),
             Self::WrongArity => write!(f, "WrongArity"),
-            Self::Return(_) => panic!(), // TODO:
+            Self::Return(_) => panic!("Panic on 'Return' must be impossible."),
         }
     }
 }
@@ -43,21 +38,22 @@ impl Debug for Error {
 type Result<V, E = Error> = std::result::Result<V, E>;
 
 impl Callable {
-    fn bind(&self, instance: Rc<Instance>) -> Callable {
+    fn bind(&self, object: Rc<Object>) -> Callable {
         match &self.fun {
             Function::Lox(fun) => {
                 let instance_closure = Scope::new(fun.closure.clone());
                 instance_closure
                     .borrow_mut()
-                    .define_symbol(Loc::none(), "this".to_owned(), Value::Instance(instance))
+                    .define_symbol(Loc::none(), "this".to_owned(), Value::Object(object))
                     .unwrap(); // TODO: shouldn't fail. expect?
 
                 Callable {
                     name: self.name.clone(),
                     arity: self.arity,
                     fun: Function::Lox(LoxFun {
-                        is_init: fun.is_init,
-                        decl: fun.decl.clone(),
+                        is_initializer: fun.is_initializer,
+                        params: fun.params.clone(),
+                        body: fun.body.clone(),
                         closure: instance_closure,
                     }),
                 }
@@ -67,8 +63,9 @@ impl Callable {
     }
 }
 
-impl Instance {
-    fn get(&self, this: Rc<Instance>, loc: Loc, property: &str) -> Result<Value> {
+impl Object {
+    // TODO: Self? don't pass this.
+    fn get(&self, this: Rc<Object>, loc: Loc, property: &str) -> Result<Value> {
         if let Some(value) = self.fields.borrow().get(property) {
             Ok(value.clone())
         } else if let Some(method) = self.class.methods.get(property) {
@@ -79,7 +76,7 @@ impl Instance {
         }
     }
 
-    fn try_get_method(&self, this: Rc<Instance>, method: &str) -> Option<Callable> {
+    fn try_get_method(&self, this: Rc<Object>, method: &str) -> Option<Callable> {
         if let Some(method) = self.class.methods.get(method) {
             Some(method.bind(this))
         } else {
@@ -90,40 +87,6 @@ impl Instance {
     fn set(&self, property: String, value: Value) {
         self.fields.borrow_mut().insert(property, value);
     }
-}
-
-pub type NativeFun = fn(Vec<Value>) -> Value;
-
-#[derive(Clone)]
-pub struct LoxFun {
-    decl: Rc<LoxFunDecl>,
-    closure: Rc<RefCell<Scope>>,
-    is_init: bool,
-}
-
-impl PartialEq for LoxFun {
-    fn eq(&self, other: &Self) -> bool {
-        self.is_init == other.is_init
-            && Rc::ptr_eq(&self.decl, &other.decl)
-            && Rc::ptr_eq(&self.closure, &other.closure)
-    }
-}
-
-pub struct Constructor {
-    class: Weak<Class>,
-}
-
-impl PartialEq for Constructor {
-    fn eq(&self, other: &Self) -> bool {
-        Weak::ptr_eq(&self.class, &other.class)
-    }
-}
-
-#[derive(PartialEq)]
-pub enum Function {
-    Native(NativeFun),
-    Lox(LoxFun),
-    Constructor(Constructor), // TODO: shorter name?
 }
 
 impl Value {
@@ -150,9 +113,9 @@ impl Value {
         }
     }
 
-    fn to_number(&self, loc: Loc) -> Result<&f64> {
+    fn to_number(&self, loc: Loc) -> Result<f64> {
         match self {
-            Value::Number(num) => Ok(num),
+            Value::Number(num) => Ok(*num),
             _ => self.type_expected_error(loc, "number"),
         }
     }
@@ -165,15 +128,15 @@ impl Value {
         }
     }
 
-    fn to_instance(&self, loc: Loc) -> Result<&Rc<Instance>> {
+    fn to_instance(&self, loc: Loc) -> Result<&Rc<Object>> {
         match self {
-            Value::Instance(instance) => Ok(instance),
-            _ => self.type_expected_error(loc, "instance"),
+            Value::Object(object) => Ok(object),
+            _ => self.type_expected_error(loc, "object"),
         }
     }
 }
 
-struct Scope {
+pub struct Scope {
     parent: Option<Rc<RefCell<Scope>>>,
     symbols: HashMap<String, Value>,
 }
@@ -279,7 +242,7 @@ impl Interpreter {
         let value = self.eval_expr(&unary.expr)?;
 
         match unary.op {
-            TokenKind::Minus => Ok(Value::Number(-1.0 * value.to_number(unary.expr.loc)?.clone())),
+            TokenKind::Minus => Ok(Value::Number(-1.0 * value.to_number(unary.expr.loc)?)),
             TokenKind::Bang => Ok(Value::Bool(!value.is_truthy())),
             _ => panic!("Unexpected unary operand: {:?}", unary.op),
         }
@@ -290,8 +253,8 @@ impl Interpreter {
         let right = self.eval_expr(&binary.right)?;
 
         match binary.op {
-            TokenKind::EqualEqual => Ok(Value::Bool(left == right)),
-            TokenKind::BangEqual => Ok(Value::Bool(left != right)),
+            TokenKind::EqualEqual => Ok(Value::Bool(left.equals(&right))),
+            TokenKind::BangEqual => Ok(Value::Bool(!left.equals(&right))),
             TokenKind::Greater => Ok(Value::Bool(
                 left.to_number(binary.left.loc)? > right.to_number(binary.right.loc)?,
             )),
@@ -306,9 +269,7 @@ impl Interpreter {
             )),
             TokenKind::Plus => {
                 if left.is_string() || right.is_string() {
-                    Ok(Value::String(
-                        left.convert_to_string(false) + &right.convert_to_string(false),
-                    ))
+                    Ok(Value::String(left.convert_to_string(false) + &right.convert_to_string(false)))
                 } else {
                     Ok(Value::Number(
                         left.to_number(binary.left.loc)? + right.to_number(binary.right.loc)?,
@@ -323,7 +284,7 @@ impl Interpreter {
             )),
             TokenKind::Slash => {
                 let denom = right.to_number(binary.right.loc)?;
-                if *denom == 0.0 {
+                if denom == 0.0 {
                     print_error(binary.right.loc, "Division by 0");
                     Err(Error::DivisionByZero)
                 } else {
@@ -360,42 +321,43 @@ impl Interpreter {
         match &callable.fun {
             Function::Native(fun) => Ok(fun(args)),
             Function::Lox(LoxFun {
-                is_init,
-                decl,
+                is_initializer,
+                params,
+                body,
                 closure,
             }) => {
                 let new_scope = Scope::new(closure.clone());
                 let prev_scope = mem::replace(&mut self.scope, new_scope);
 
-                assert!(decl.params.len() == args.len());
-                for (param, arg) in decl.params.iter().zip(args.into_iter()) {
+                assert!(params.len() == args.len());
+                for (param, arg) in params.iter().zip(args.into_iter()) {
                     self.define_symbol(param.loc, param.name.clone(), arg)?;
                 }
 
-                let result = match self.eval_stmts(&decl.body) {
+                let result = match self.eval_stmts(body) {
                     Err(Error::Return(value)) => Ok(value),
                     Ok(_) => Ok(Value::Null),
                     Err(err) => Err(err),
                 };
 
                 self.scope = prev_scope;
-                if *is_init {
+                if *is_initializer {
                     Ok(closure.borrow().get_symbol(Loc::none(), "this").unwrap())
                 } else {
                     result
                 }
             },
             Function::Constructor(constructor) => {
-                let instance = Rc::new(Instance {
+                let object = Rc::new(Object {
                     class: constructor.class.upgrade().unwrap(), // TODO: is unwrapping ok?
                     fields: RefCell::new(HashMap::new()),
                 });
 
-                if let Some(constructor_method) = instance.try_get_method(instance.clone(), "init") {
-                    self.call_callable(&constructor_method, args)?;
+                if let Some(initializer) = object.try_get_method(object.clone(), Class::INITIALIZER_METHOD) {
+                    self.call_callable(&initializer, args)?;
                 }
 
-                Ok(Value::Instance(instance))
+                Ok(Value::Object(object))
             },
         }
     }
@@ -424,19 +386,19 @@ impl Interpreter {
         self.call_callable(callable, arg_values)
     }
 
-    fn eval_get(&mut self, get: &Get) -> Result<Value> {
+    fn eval_get(&mut self, get: &GetProp) -> Result<Value> {
         let value = self.eval_expr(&get.object)?;
-        let instance = value.to_instance(get.object.loc)?;
-        let property = instance.get(instance.clone(), get.object.loc, &get.property)?;
+        let object = value.to_instance(get.object.loc)?;
+        let property = object.get(object.clone(), get.object.loc, &get.property)?;
         Ok(property.clone())
     }
 
-    fn eval_set(&mut self, set: &Set) -> Result<Value> {
+    fn eval_set(&mut self, set: &SetProp) -> Result<Value> {
         let value = self.eval_expr(&set.object)?;
-        let instance = value.to_instance(set.object.loc)?;
+        let object = value.to_instance(set.object.loc)?;
 
         let set_value = self.eval_expr(&set.expr)?;
-        instance.set(set.property.clone(), set_value.clone());
+        object.set(set.property.clone(), set_value.clone());
 
         Ok(set_value)
     }
@@ -454,18 +416,19 @@ impl Interpreter {
                 Ok(value)
             },
             Expr::Call(call) => self.eval_call(call),
-            Expr::Get(get) => self.eval_get(get),
-            Expr::Set(set) => self.eval_set(set),
+            Expr::GetProp(get) => self.eval_get(get),
+            Expr::SetProp(set) => self.eval_set(set),
         }
     }
 
     fn fun_to_callable(&self, fun: &FunDecl, is_method: bool) -> Rc<Callable> {
         Rc::new(Callable {
             name: fun.name.clone(),
-            arity: fun.decl.params.len(),
+            arity: fun.params.len(),
             fun: Function::Lox(LoxFun {
-                is_init: is_method && fun.name == "init",
-                decl: fun.decl.clone(),
+                is_initializer: is_method && fun.name == Class::INITIALIZER_METHOD,
+                params: fun.params.clone(),
+                body: fun.body.clone(),
                 closure: self.scope.clone(),
             }),
         })
@@ -530,8 +493,8 @@ impl Interpreter {
                     methods.insert(method.name.clone(), value);
                 }
 
-                let arity = if let Some(constructor) = methods.get("init") {
-                    constructor.arity
+                let arity = if let Some(initializer) = methods.get(Class::INITIALIZER_METHOD) {
+                    initializer.arity
                 } else {
                     0
                 };

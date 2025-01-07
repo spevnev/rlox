@@ -3,11 +3,12 @@ use std::collections::HashMap;
 use crate::{
     error::{print_error, Loc},
     parser::{Assign, Binary, Call, Expr, FunDecl, If, LocExpr, Return, Stmt, Var, VarDecl, VarScope, While},
+    value::Class,
 };
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum VarState {
-    // Declared means that the name is taken, but usage is invalid.
+    /// Declared means that the name is taken, but usage is still invalid.
     Declared,
     Defined,
 }
@@ -16,7 +17,7 @@ enum VarState {
 enum FunType {
     None,
     Function,
-    Constructor,
+    Initializer,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -108,8 +109,8 @@ impl Resolver {
                     self.resolve_expr(arg);
                 }
             },
-            Expr::Get(get) => self.resolve_expr(&get.object),
-            Expr::Set(set) => {
+            Expr::GetProp(get) => self.resolve_expr(&get.object),
+            Expr::SetProp(set) => {
                 self.resolve_expr(&set.expr);
                 self.resolve_expr(&set.object);
             },
@@ -124,18 +125,18 @@ impl Resolver {
         }
     }
 
-    fn resolve_fun(&mut self, FunDecl { name_loc, name, decl }: &FunDecl, fun_type: FunType) {
-        self.define(*name_loc, name);
+    fn resolve_fun(&mut self, fun: &FunDecl, fun_type: FunType) {
+        self.define(fun.name_loc, &fun.name);
 
         self.scopes.push(HashMap::new());
 
-        for param in &decl.params {
+        for param in &fun.params {
             self.define(param.loc, &param.name);
         }
 
         let prev_fun = self.current_fun;
         self.current_fun = fun_type;
-        for stmt in &decl.body {
+        for stmt in fun.body.as_ref() {
             self.resolve_stmt(stmt);
         }
         self.current_fun = prev_fun;
@@ -175,7 +176,7 @@ impl Resolver {
                 self.resolve_expr(init);
                 self.define(*name_loc, name);
             },
-            Stmt::FunDecl(decl) => self.resolve_fun(decl, FunType::Function),
+            Stmt::FunDecl(fun) => self.resolve_fun(fun, FunType::Function),
             Stmt::Return(Return { loc, expr }) => {
                 if self.current_fun == FunType::None {
                     self.had_error = true;
@@ -183,7 +184,7 @@ impl Resolver {
                 }
 
                 if let Some(expr) = expr {
-                    if self.current_fun == FunType::Constructor {
+                    if self.current_fun == FunType::Initializer {
                         self.had_error = true;
                         print_error(expr.loc, "Can't return value from initializer ('init' method)");
                     }
@@ -199,8 +200,8 @@ impl Resolver {
                 let prev_class = self.current_class;
                 self.current_class = ClassType::Class;
                 for method in &decl.methods {
-                    let fun_type = if method.name == "init" {
-                        FunType::Constructor
+                    let fun_type = if method.name == Class::INITIALIZER_METHOD {
+                        FunType::Initializer
                     } else {
                         FunType::Function
                     };
