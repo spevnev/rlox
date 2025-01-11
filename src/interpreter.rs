@@ -5,7 +5,8 @@ use crate::{
     lexer::TokenKind,
     native::get_native_functions_as_symbols,
     parser::{
-        Binary, Call, Expr, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Unary, Var, VarDecl, VarScope, While,
+        Binary, Call, Expr, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Super, Unary, Var, VarDecl, VarScope,
+        While,
     },
     value::{Callable, Class, Constructor, Function, LoxFun, Object, Value},
 };
@@ -44,7 +45,7 @@ impl Callable {
                 let instance_closure = Scope::new(fun.closure.clone());
                 instance_closure
                     .borrow_mut()
-                    .define_symbol(Loc::none(), "this".to_owned(), Value::Object(object))
+                    .define_symbol(Loc::none(), Class::THIS.to_owned(), Value::Object(object))
                     .unwrap(); // TODO: shouldn't fail. expect?
 
                 Callable {
@@ -68,19 +69,11 @@ impl Object {
     fn get(&self, this: Rc<Object>, loc: Loc, property: &str) -> Result<Value> {
         if let Some(value) = self.fields.borrow().get(property) {
             Ok(value.clone())
-        } else if let Some(method) = self.class.methods.get(property) {
+        } else if let Some(method) = self.class.get_method(property) {
             Ok(Value::Callable(Rc::new(method.bind(this))))
         } else {
             print_error(loc, &format!("Undefined property '{}'", property));
             Err(Error::UndefinedSymbol)
-        }
-    }
-
-    fn try_get_method(&self, this: Rc<Object>, method: &str) -> Option<Callable> {
-        if let Some(method) = self.class.methods.get(method) {
-            Some(method.bind(this))
-        } else {
-            None
         }
     }
 
@@ -132,6 +125,13 @@ impl Value {
         match self {
             Value::Object(object) => Ok(object),
             _ => self.type_expected_error(loc, "object"),
+        }
+    }
+
+    fn to_class(&self, loc: Loc) -> Result<&Rc<Class>> {
+        match self {
+            Value::Class(class) => Ok(class),
+            _ => self.type_expected_error(loc, "class"),
         }
     }
 }
@@ -342,7 +342,7 @@ impl Interpreter {
 
                 self.scope = prev_scope;
                 if *is_initializer {
-                    Ok(closure.borrow().get_symbol(Loc::none(), "this").unwrap())
+                    Ok(closure.borrow().get_symbol(Loc::none(), Class::THIS).unwrap())
                 } else {
                     result
                 }
@@ -353,8 +353,8 @@ impl Interpreter {
                     fields: RefCell::new(HashMap::new()),
                 });
 
-                if let Some(initializer) = object.try_get_method(object.clone(), Class::INITIALIZER_METHOD) {
-                    self.call_callable(&initializer, args)?;
+                if let Some(initializer) = object.class.methods.get(Class::INITIALIZER_METHOD) {
+                    self.call_callable(&initializer.bind(object.clone()), args)?;
                 }
 
                 Ok(Value::Object(object))
@@ -418,6 +418,22 @@ impl Interpreter {
             Expr::Call(call) => self.eval_call(call),
             Expr::GetProp(get) => self.eval_get(get),
             Expr::SetProp(set) => self.eval_set(set),
+            Expr::Super(Super { var, method }) => {
+                let value = self.get_symbol(expr.loc, var)?;
+                let superclass = value.to_class(expr.loc)?;
+
+                if let Some(method) = superclass.get_method(&method) {
+                    // Scopes are structured such that "this" is always one scope closer than "super",
+                    // which makes this hack possible.
+                    let depth = var.scope.get().get_relative().expect("'super' mustn't be in global scope") - 1;
+                    let value = self.scope.borrow().get_symbol_at(expr.loc, Class::THIS, depth)?;
+                    let this = value.to_instance(expr.loc)?.clone();
+                    Ok(Value::Callable(Rc::new(method.bind(this))))
+                } else {
+                    print_error(expr.loc, &format!("Undefined superclass method '{}'", method));
+                    Err(Error::UndefinedSymbol)
+                }
+            },
         }
     }
 
@@ -487,10 +503,28 @@ impl Interpreter {
                 return Err(Error::Return(value));
             },
             Stmt::ClassDecl(decl) => {
+                let prev_scope = self.scope.clone();
+                let superclass;
+                if let Some((loc, var)) = &decl.superclass {
+                    let value = self.get_symbol(*loc, var)?;
+                    let superclass_ref = value.to_class(*loc)?;
+
+                    self.scope = Scope::new(self.scope.clone()); // add "super" scope
+                    self.define_symbol(*loc, Class::SUPER.to_owned(), Value::Class(superclass_ref.clone()))?;
+
+                    superclass = Some(superclass_ref.clone());
+                } else {
+                    superclass = None;
+                }
+
                 let mut methods = HashMap::new();
                 for method in &decl.methods {
                     let value = self.fun_to_callable(method, true);
                     methods.insert(method.name.clone(), value);
+                }
+
+                if decl.superclass.is_some() {
+                    self.scope = prev_scope; // remove "super" scope
                 }
 
                 let arity = if let Some(initializer) = methods.get(Class::INITIALIZER_METHOD) {
@@ -499,13 +533,14 @@ impl Interpreter {
                     0
                 };
 
-                let class = Value::Class(Rc::new_cyclic(|s| Class {
+                let class = Value::Class(Rc::new_cyclic(|class| Class {
                     decl: decl.clone(),
                     methods,
+                    superclass,
                     constructor: Rc::new(Callable {
                         name: decl.name.clone(),
                         arity,
-                        fun: Function::Constructor(Constructor { class: s.clone() }),
+                        fun: Function::Constructor(Constructor { class: class.clone() }),
                     }),
                 }));
                 self.define_symbol(decl.name_loc, decl.name.clone(), class)?;

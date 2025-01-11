@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     error::{print_error, Loc},
-    parser::{Assign, Binary, Call, Expr, FunDecl, If, LocExpr, Return, Stmt, Var, VarDecl, VarScope, While},
+    parser::{Assign, Binary, Call, Expr, FunDecl, If, LocExpr, Return, Stmt, Super, Var, VarDecl, VarScope, While},
     value::Class,
 };
 
@@ -24,6 +24,7 @@ enum FunType {
 enum ClassType {
     None,
     Class,
+    Subclass,
 }
 
 struct Resolver {
@@ -122,6 +123,17 @@ impl Resolver {
 
                 self.resolve_var(expr.loc, var);
             },
+            Expr::Super(Super { var, method: _ }) => {
+                if self.current_class == ClassType::None {
+                    self.had_error = true;
+                    print_error(expr.loc, "'super' outside of class");
+                } else if self.current_class == ClassType::Class {
+                    self.had_error = true;
+                    print_error(expr.loc, "'super' in a class without superclass");
+                }
+
+                self.resolve_var(expr.loc, var);
+            },
         }
     }
 
@@ -194,11 +206,25 @@ impl Resolver {
             Stmt::ClassDecl(decl) => {
                 self.define(decl.name_loc, &decl.name);
 
-                self.scopes.push(HashMap::new());
-                self.define(Loc::none(), "this");
-
                 let prev_class = self.current_class;
-                self.current_class = ClassType::Class;
+                if let Some((loc, superclass)) = &decl.superclass {
+                    if superclass.name == decl.name {
+                        self.had_error = true;
+                        print_error(*loc, "Class can't inherit from itself");
+                    } else {
+                        self.resolve_var(*loc, superclass);
+                    }
+
+                    self.scopes.push(HashMap::new()); // add "super" scope
+                    self.define(Loc::none(), Class::SUPER);
+                    self.current_class = ClassType::Subclass;
+                } else {
+                    self.current_class = ClassType::Class;
+                }
+
+                self.scopes.push(HashMap::new()); // add "this" scope
+                self.define(Loc::none(), Class::THIS);
+
                 for method in &decl.methods {
                     let fun_type = if method.name == Class::INITIALIZER_METHOD {
                         FunType::Initializer
@@ -209,7 +235,11 @@ impl Resolver {
                 }
                 self.current_class = prev_class;
 
-                self.scopes.pop();
+                self.scopes.pop(); // remove "this" scope
+
+                if decl.superclass.is_some() {
+                    self.scopes.pop(); // remove "super" scope
+                }
             },
         }
     }

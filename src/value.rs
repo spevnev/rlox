@@ -38,11 +38,25 @@ pub struct Callable {
 pub struct Class {
     pub decl: Rc<ClassDecl>,
     pub methods: HashMap<String, Rc<Callable>>,
+    pub superclass: Option<Rc<Class>>,
     pub constructor: Rc<Callable>,
 }
 
 impl Class {
+    pub const THIS: &'static str = "this";
+    pub const SUPER: &'static str = "super";
+
     pub const INITIALIZER_METHOD: &'static str = "init";
+
+    pub fn get_method(&self, name: &str) -> Option<Rc<Callable>> {
+        if let Some(method) = self.methods.get(name) {
+            Some(method.clone())
+        } else if let Some(superclass) = &self.superclass {
+            superclass.get_method(name)
+        } else {
+            None
+        }
+    }
 }
 
 pub struct Object {

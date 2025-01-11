@@ -3,7 +3,7 @@ use std::{cell::Cell, rc::Rc};
 use crate::{
     error::{error, print_error, Loc},
     lexer::{Token, TokenKind},
-    value::Value,
+    value::{Class, Value},
 };
 
 impl Token {
@@ -45,6 +45,15 @@ pub enum VarScope {
     Relative(i32),
 }
 
+impl VarScope {
+    pub fn get_relative(&self) -> Option<i32> {
+        match self {
+            VarScope::Global => None,
+            VarScope::Relative(depth) => Some(*depth),
+        }
+    }
+}
+
 pub struct Var {
     pub name: String,
     pub scope: Cell<VarScope>,
@@ -80,6 +89,11 @@ pub struct SetProp {
     pub expr: Box<LocExpr>,
 }
 
+pub struct Super {
+    pub var: Var,
+    pub method: String,
+}
+
 pub enum Expr {
     Literal(Value),
     Unary(Unary),
@@ -91,6 +105,7 @@ pub enum Expr {
     GetProp(GetProp),
     SetProp(SetProp),
     This(Var),
+    Super(Super),
 }
 
 pub struct LocExpr {
@@ -189,7 +204,17 @@ impl LocExpr {
     fn new_this(loc: Loc) -> Self {
         Self {
             loc,
-            expr: Expr::This(Var::new("this".to_owned())),
+            expr: Expr::This(Var::new(Class::THIS.to_owned())),
+        }
+    }
+
+    fn new_super(loc: Loc, method: String) -> Self {
+        Self {
+            loc,
+            expr: Expr::Super(Super {
+                var: Var::new(Class::SUPER.to_owned()),
+                method,
+            }),
         }
     }
 }
@@ -233,6 +258,7 @@ pub struct ClassDecl {
     pub name_loc: Loc,
     pub name: String,
     pub methods: Vec<FunDecl>,
+    pub superclass: Option<(Loc, Var)>,
 }
 
 pub enum Stmt {
@@ -405,6 +431,17 @@ impl Parser {
             TokenKind::Null => Ok(LocExpr::new_literal(token.loc, Value::Null)),
             TokenKind::Identifier => Ok(LocExpr::new_var(token.loc, token.to_identifier()?)),
             TokenKind::This => Ok(LocExpr::new_this(token.loc)),
+            TokenKind::Super => {
+                self.consume(
+                    TokenKind::Dot,
+                    "Expected '.' after 'super'. 'super' can only be used to access methods",
+                )?;
+                let method_token = self.consume(
+                    TokenKind::Identifier,
+                    "Expected method name (an identifier) after 'super'. 'super' can only be used to access methods",
+                )?;
+                Ok(LocExpr::new_super(token.loc, method_token.to_identifier()?))
+            },
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
                 self.consume(TokenKind::RightParen, "Unclosed '(', expected ')'")?;
@@ -803,6 +840,14 @@ impl Parser {
         self.expect(TokenKind::Class);
         let name_token = self.consume(TokenKind::Identifier, "Expected an identifier after 'class'")?;
 
+        let superclass;
+        if self.try_consume(TokenKind::Less) {
+            let token = self.consume(TokenKind::Identifier, "Expected a superclass name (an identifier) after '<'")?;
+            superclass = Some((token.loc, Var::new(token.to_identifier()?)));
+        } else {
+            superclass = None;
+        }
+
         self.consume(TokenKind::LeftBrace, "Expected '{' before class body")?;
         let mut methods = Vec::new();
         while !self.is_done() && !self.is_next(TokenKind::RightBrace) {
@@ -812,6 +857,7 @@ impl Parser {
 
         Ok(Stmt::ClassDecl(Rc::new(ClassDecl {
             name_loc: name_token.loc,
+            superclass,
             name: name_token.to_identifier()?,
             methods,
         })))
