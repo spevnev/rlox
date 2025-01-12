@@ -1,5 +1,5 @@
 use crate::{
-    error::{error, print_error, Loc},
+    error::{error, Loc},
     value::Value,
 };
 
@@ -25,8 +25,6 @@ pub enum TokenKind {
     GreaterEqual,
     Less,
     LessEqual,
-    AndAnd,
-    PipePipe,
 
     // Literals
     Identifier,
@@ -34,13 +32,16 @@ pub enum TokenKind {
     Number,
 
     // Keywords
+    And,
     Class,
     Else,
     False,
     Fun,
     For,
     If,
-    Null,
+    Nil,
+    Or,
+    Print,
     Return,
     Super,
     This,
@@ -71,18 +72,19 @@ impl TokenKind {
             TokenKind::GreaterEqual => ">=",
             TokenKind::Less => "<",
             TokenKind::LessEqual => "<=",
-            TokenKind::AndAnd => "&&",
-            TokenKind::PipePipe => "||",
             TokenKind::Identifier => "identifier",
             TokenKind::String => "string",
             TokenKind::Number => "number",
+            TokenKind::And => "and",
             TokenKind::Class => "class",
             TokenKind::Else => "else",
             TokenKind::False => "false",
             TokenKind::Fun => "fun",
             TokenKind::For => "for",
             TokenKind::If => "if",
-            TokenKind::Null => "null",
+            TokenKind::Nil => "nil",
+            TokenKind::Or => "or",
+            TokenKind::Print => "print",
             TokenKind::Return => "return",
             TokenKind::Super => "super",
             TokenKind::This => "this",
@@ -94,13 +96,16 @@ impl TokenKind {
 }
 
 static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
+    "and"    => TokenKind::And,
     "class"  => TokenKind::Class,
     "else"   => TokenKind::Else,
     "false"  => TokenKind::False,
     "for"    => TokenKind::For,
     "fun"    => TokenKind::Fun,
     "if"     => TokenKind::If,
-    "null"   => TokenKind::Null,
+    "nil"    => TokenKind::Nil,
+    "or"     => TokenKind::Or,
+    "print"  => TokenKind::Print,
     "return" => TokenKind::Return,
     "super"  => TokenKind::Super,
     "this"   => TokenKind::This,
@@ -193,6 +198,11 @@ impl Lexer {
 }
 
 pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
+    if !source.is_ascii() {
+        eprintln!("[ERROR] non-ASCII characters aren't supported.");
+        return Err(());
+    }
+
     let mut lexer = Lexer::new(source);
     let mut tokens: Vec<Token> = Vec::new();
     let mut had_error = false;
@@ -201,7 +211,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
         let start = lexer.index;
         let loc = lexer.current_loc();
 
-        let mut value = Value::Null;
+        let mut value = Value::Nil;
         let kind = match lexer.advance().unwrap() {
             ' ' | '\r' | '\t' => continue,
             '\n' => {
@@ -259,24 +269,6 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                     TokenKind::Less
                 }
             },
-            '&' => {
-                if lexer.consume('&') {
-                    TokenKind::AndAnd
-                } else {
-                    print_error(loc, "Lox doesn't have bitwise operators");
-                    had_error = true;
-                    continue;
-                }
-            },
-            '|' => {
-                if lexer.consume('|') {
-                    TokenKind::PipePipe
-                } else {
-                    print_error(loc, "Lox doesn't have bitwise operators");
-                    had_error = true;
-                    continue;
-                }
-            },
             '"' => {
                 let mut backslashes = 0;
                 let mut is_terminated = false;
@@ -295,7 +287,8 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                 }
 
                 if !is_terminated {
-                    return error(loc, "Unterminated string");
+                    error(loc, "Unterminated string");
+                    return Err(());
                 }
 
                 value = Value::String(source[(start + 1)..(lexer.index - 1)].to_owned());
@@ -321,8 +314,14 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
 
                 // Fractional part
                 if lexer.consume('.') {
+                    let mut has_fraction = false;
                     while lexer.peek().is_some_and(|c| c.is_ascii_digit()) {
                         lexer.advance();
+                        has_fraction = true;
+                    }
+                    if !has_fraction {
+                        // If there are no digits after the dot, exclude it from the token.
+                        lexer.index -= 1;
                     }
                 }
 
@@ -330,13 +329,13 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                     value = Value::Number(number);
                     TokenKind::Number
                 } else {
-                    print_error(loc, &format!("Unable to parse number '{}'", &source[start..lexer.index]));
+                    error(loc, &format!("Unable to parse number '{}'", &source[start..lexer.index]));
                     had_error = true;
                     continue;
                 }
             },
             c => {
-                print_error(loc, &format!("Unknown character '{c}'"));
+                error(loc, &format!("Unknown character '{c}'"));
                 had_error = true;
                 continue;
             },

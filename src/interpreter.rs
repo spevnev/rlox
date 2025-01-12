@@ -1,21 +1,19 @@
 use std::{cell::RefCell, collections::HashMap, fmt::Debug, mem, rc::Rc};
 
 use crate::{
-    error::{print_error, Loc},
+    error::{error, Loc},
     lexer::TokenKind,
     native::get_native_functions_as_symbols,
     parser::{
-        Binary, Call, Expr, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Super, Unary, Var, VarDecl, VarScope,
-        While,
+        Binary, Call, Expr, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Super, Superclass, Unary, Var,
+        VarScope, While,
     },
-    value::{Callable, Class, Constructor, Function, LoxFun, Object, Value},
+    value::{Callable, Class, Function, Instance, LoxFun, Value},
 };
 
 pub enum Error {
-    MismatchingType,
-    SymbolRedeclaration,
+    WrongType,
     UndefinedSymbol,
-    DivisionByZero,
     WrongArity,
 
     // The following aren't actual errors, and are used to quickly return from a deeply nested call:
@@ -26,10 +24,8 @@ pub enum Error {
 impl Debug for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MismatchingType => write!(f, "MismatchingType"),
-            Self::SymbolRedeclaration => write!(f, "SymbolRedeclaration"),
+            Self::WrongType => write!(f, "WrongType"),
             Self::UndefinedSymbol => write!(f, "UndefinedSymbol"),
-            Self::DivisionByZero => write!(f, "DivisionByZero"),
             Self::WrongArity => write!(f, "WrongArity"),
             Self::Return(_) => panic!("Panic on 'Return' must be impossible."),
         }
@@ -39,14 +35,13 @@ impl Debug for Error {
 type Result<V, E = Error> = std::result::Result<V, E>;
 
 impl Callable {
-    fn bind(&self, object: Rc<Object>) -> Callable {
+    fn bind(&self, instance: Rc<Instance>) -> Callable {
         match &self.fun {
             Function::Lox(fun) => {
                 let instance_closure = Scope::new(fun.closure.clone());
                 instance_closure
                     .borrow_mut()
-                    .define_symbol(Loc::none(), Class::THIS.to_owned(), Value::Object(object))
-                    .unwrap(); // TODO: shouldn't fail. expect?
+                    .define_symbol(Class::THIS.to_owned(), Value::Instance(instance));
 
                 Callable {
                     name: self.name.clone(),
@@ -64,15 +59,15 @@ impl Callable {
     }
 }
 
-impl Object {
+impl Instance {
     // TODO: Self? don't pass this.
-    fn get(&self, this: Rc<Object>, loc: Loc, property: &str) -> Result<Value> {
+    fn get(&self, this: Rc<Instance>, property_loc: Loc, property: &str) -> Result<Value> {
         if let Some(value) = self.fields.borrow().get(property) {
             Ok(value.clone())
         } else if let Some(method) = self.class.get_method(property) {
             Ok(Value::Callable(Rc::new(method.bind(this))))
         } else {
-            print_error(loc, &format!("Undefined property '{}'", property));
+            error(property_loc, &format!("Undefined property '{}'", property));
             Err(Error::UndefinedSymbol)
         }
     }
@@ -84,11 +79,11 @@ impl Object {
 
 impl Value {
     fn type_expected_error<T>(&self, loc: Loc, expected: &str) -> Result<T> {
-        print_error(
+        error(
             loc,
             &format!("Expected {expected} but found '{}'", self.convert_to_string(true)),
         );
-        Err(Error::MismatchingType)
+        Err(Error::WrongType)
     }
 
     fn is_string(&self) -> bool {
@@ -101,7 +96,7 @@ impl Value {
     fn is_truthy(&self) -> bool {
         match self {
             Value::Bool(bool) => *bool,
-            Value::Null => false,
+            Value::Nil => false,
             _ => true,
         }
     }
@@ -113,25 +108,17 @@ impl Value {
         }
     }
 
-    fn to_callable(&self, loc: Loc) -> Result<&Callable> {
+    fn to_instance(&self) -> Option<&Rc<Instance>> {
         match self {
-            Value::Callable(callable) => Ok(callable),
-            Value::Class(class) => Ok(&class.constructor),
-            _ => self.type_expected_error(loc, "function or constructor"),
+            Value::Instance(instance) => Some(instance),
+            _ => None,
         }
     }
 
-    fn to_instance(&self, loc: Loc) -> Result<&Rc<Object>> {
+    fn to_class(&self) -> Option<&Rc<Class>> {
         match self {
-            Value::Object(object) => Ok(object),
-            _ => self.type_expected_error(loc, "object"),
-        }
-    }
-
-    fn to_class(&self, loc: Loc) -> Result<&Rc<Class>> {
-        match self {
-            Value::Class(class) => Ok(class),
-            _ => self.type_expected_error(loc, "class"),
+            Value::Class(class) => Some(class),
+            _ => None,
         }
     }
 }
@@ -156,30 +143,23 @@ impl Scope {
         }))
     }
 
-    fn define_symbol(&mut self, loc: Loc, name: String, value: Value) -> Result<()> {
-        if !self.symbols.contains_key(&name) {
-            self.symbols.insert(name, value);
-            Ok(())
-        } else {
-            print_error(loc, &format!("Redeclaration of symbol '{}'", name));
-            Err(Error::SymbolRedeclaration)
-        }
+    fn define_symbol(&mut self, name: String, value: Value) {
+        self.symbols.insert(name, value);
     }
 
-    fn get_symbol(&self, loc: Loc, name: &str) -> Result<Value> {
+    fn get_symbol(&self, name: &str) -> Option<Value> {
         if let Some(value) = self.symbols.get(name) {
-            Ok(value.clone())
+            Some(value.clone())
         } else {
-            print_error(loc, &format!("Undefined symbol '{}'", name));
-            Err(Error::UndefinedSymbol)
+            None
         }
     }
 
-    fn get_symbol_at(&self, loc: Loc, name: &str, depth: i32) -> Result<Value> {
+    fn get_symbol_at(&self, name: &str, depth: i32) -> Option<Value> {
         if depth == 0 {
-            self.get_symbol(loc, name)
+            self.get_symbol(name)
         } else if let Some(parent) = &self.parent {
-            parent.borrow().get_symbol_at(loc, name, depth - 1)
+            parent.borrow().get_symbol_at(name, depth - 1)
         } else {
             panic!("Scope has no parent.");
         }
@@ -190,7 +170,7 @@ impl Scope {
             *var = value;
             Ok(())
         } else {
-            print_error(loc, &format!("Assigning to undefined variable '{}'", name));
+            error(loc, &format!("Assigning to undefined variable '{}'", name));
             Err(Error::UndefinedSymbol)
         }
     }
@@ -220,14 +200,14 @@ impl Interpreter {
         }
     }
 
-    fn define_symbol(&self, loc: Loc, name: String, value: Value) -> Result<()> {
-        self.scope.borrow_mut().define_symbol(loc, name, value)
+    fn define_symbol(&self, name: String, value: Value) {
+        self.scope.borrow_mut().define_symbol(name, value);
     }
 
-    fn get_symbol(&self, loc: Loc, var: &Var) -> Result<Value> {
+    fn get_symbol(&self, var: &Var) -> Option<Value> {
         match var.scope.get() {
-            VarScope::Global => self.global.borrow().get_symbol(loc, &var.name),
-            VarScope::Relative(depth) => self.scope.borrow().get_symbol_at(loc, &var.name, depth),
+            VarScope::Global => self.global.borrow().get_symbol(&var.name),
+            VarScope::Relative(depth) => self.scope.borrow().get_symbol_at(&var.name, depth),
         }
     }
 
@@ -282,15 +262,9 @@ impl Interpreter {
             TokenKind::Star => Ok(Value::Number(
                 left.to_number(binary.left.loc)? * right.to_number(binary.right.loc)?,
             )),
-            TokenKind::Slash => {
-                let denom = right.to_number(binary.right.loc)?;
-                if denom == 0.0 {
-                    print_error(binary.right.loc, "Division by 0");
-                    Err(Error::DivisionByZero)
-                } else {
-                    Ok(Value::Number(left.to_number(binary.left.loc)? / denom))
-                }
-            },
+            TokenKind::Slash => Ok(Value::Number(
+                left.to_number(binary.left.loc)? / right.to_number(binary.right.loc)?,
+            )),
             _ => panic!("Unexpected binary operand: {:?}", binary.op),
         }
     }
@@ -299,14 +273,14 @@ impl Interpreter {
         let left = self.eval_expr(&binary.left)?;
 
         match binary.op {
-            TokenKind::AndAnd => {
+            TokenKind::And => {
                 if left.is_truthy() {
                     self.eval_expr(&binary.right)
                 } else {
                     Ok(left)
                 }
             },
-            TokenKind::PipePipe => {
+            TokenKind::Or => {
                 if left.is_truthy() {
                     Ok(left)
                 } else {
@@ -317,63 +291,37 @@ impl Interpreter {
         }
     }
 
-    fn call_callable(&mut self, callable: &Callable, args: Vec<Value>) -> Result<Value> {
-        match &callable.fun {
-            Function::Native(fun) => Ok(fun(args)),
-            Function::Lox(LoxFun {
-                is_initializer,
-                params,
-                body,
-                closure,
-            }) => {
-                let new_scope = Scope::new(closure.clone());
-                let prev_scope = mem::replace(&mut self.scope, new_scope);
+    fn eval_lox_fun(&mut self, fun: &LoxFun, args: Vec<Value>) -> Result<Value> {
+        let new_scope = Scope::new(fun.closure.clone());
+        let prev_scope = mem::replace(&mut self.scope, new_scope);
 
-                assert!(params.len() == args.len());
-                for (param, arg) in params.iter().zip(args.into_iter()) {
-                    self.define_symbol(param.loc, param.name.clone(), arg)?;
-                }
+        assert!(fun.params.len() == args.len());
+        for (param, arg) in fun.params.iter().zip(args.into_iter()) {
+            self.define_symbol(param.name.clone(), arg);
+        }
 
-                let result = match self.eval_stmts(body) {
-                    Err(Error::Return(value)) => Ok(value),
-                    Ok(_) => Ok(Value::Null),
-                    Err(err) => Err(err),
-                };
-
+        let result = match self.eval_stmts(&fun.body) {
+            Err(Error::Return(value)) => value,
+            Ok(_) => Value::Nil,
+            Err(err) => {
                 self.scope = prev_scope;
-                if *is_initializer {
-                    Ok(closure.borrow().get_symbol(Loc::none(), Class::THIS).unwrap())
-                } else {
-                    result
-                }
+                return Err(err);
             },
-            Function::Constructor(constructor) => {
-                let object = Rc::new(Object {
-                    class: constructor.class.upgrade().unwrap(), // TODO: is unwrapping ok?
-                    fields: RefCell::new(HashMap::new()),
-                });
+        };
 
-                if let Some(initializer) = object.class.methods.get(Class::INITIALIZER_METHOD) {
-                    self.call_callable(&initializer.bind(object.clone()), args)?;
-                }
-
-                Ok(Value::Object(object))
-            },
+        self.scope = prev_scope;
+        if fun.is_initializer {
+            Ok(fun.closure.borrow().get_symbol(Class::THIS).unwrap())
+        } else {
+            Ok(result)
         }
     }
 
-    fn eval_call(&mut self, call: &Call) -> Result<Value> {
-        let value = self.eval_expr(&call.callee)?;
-        let callable = value.to_callable(call.callee.loc)?;
-
-        if callable.arity != call.args.len() {
-            print_error(
+    fn eval_callable(&mut self, call: &Call, callable: &Callable) -> Result<Value> {
+        if call.args.len() != callable.arity {
+            error(
                 call.callee.loc,
-                &format!(
-                    "Wrong number of arguments, expected {} but got {}",
-                    callable.arity,
-                    call.args.len()
-                ),
+                &format!("Expected {} arguments but got {}", callable.arity, call.args.len()),
             );
             return Err(Error::WrongArity);
         }
@@ -383,22 +331,80 @@ impl Interpreter {
             arg_values.push(self.eval_expr(arg)?);
         }
 
-        self.call_callable(callable, arg_values)
+        match &callable.fun {
+            Function::Native(fun) => Ok(fun(arg_values)),
+            Function::Lox(fun) => self.eval_lox_fun(fun, arg_values),
+        }
     }
 
-    fn eval_get(&mut self, get: &GetProp) -> Result<Value> {
-        let value = self.eval_expr(&get.object)?;
-        let object = value.to_instance(get.object.loc)?;
-        let property = object.get(object.clone(), get.object.loc, &get.property)?;
+    fn eval_constructor(&mut self, call: &Call, class: Rc<Class>) -> Result<Value> {
+        let instance = Rc::new(Instance {
+            class: class.clone(),
+            fields: RefCell::new(HashMap::new()),
+        });
+
+        if let Some(initializer) = class.get_method(Class::INITIALIZER_METHOD) {
+            self.eval_callable(call, &initializer.bind(instance.clone()))?;
+        } else if !call.args.is_empty() {
+            error(
+                call.callee.loc,
+                &format!(
+                    "Class doesn't have an initializer, expected no arguments but got {}",
+                    call.args.len()
+                ),
+            );
+            return Err(Error::WrongArity);
+        }
+
+        Ok(Value::Instance(instance))
+    }
+
+    fn eval_call(&mut self, call: &Call) -> Result<Value> {
+        let value = self.eval_expr(&call.callee)?;
+        match value {
+            Value::Callable(callable) => self.eval_callable(call, &callable),
+            Value::Class(class) => self.eval_constructor(call, class),
+            _ => {
+                error(
+                    call.callee.loc,
+                    &format!("Expected function or constructor but found '{}'", value.convert_to_string(true)),
+                );
+                Err(Error::WrongType)
+            },
+        }
+    }
+
+    fn eval_get(&mut self, loc: Loc, get: &GetProp) -> Result<Value> {
+        let value = self.eval_expr(&get.instance)?;
+        let instance = value.to_instance().ok_or_else(|| {
+            error(
+                get.instance.loc,
+                &format!(
+                    "Property access expected instance but found '{}'",
+                    value.convert_to_string(true)
+                ),
+            );
+            Error::WrongType
+        })?;
+        let property = instance.get(instance.clone(), loc, &get.property)?;
         Ok(property.clone())
     }
 
     fn eval_set(&mut self, set: &SetProp) -> Result<Value> {
-        let value = self.eval_expr(&set.object)?;
-        let object = value.to_instance(set.object.loc)?;
+        let value = self.eval_expr(&set.instance)?;
+        let instance = value.to_instance().ok_or_else(|| {
+            error(
+                set.instance.loc,
+                &format!(
+                    "Property assigning expected instance but found '{}'",
+                    value.convert_to_string(true)
+                ),
+            );
+            Error::WrongType
+        })?;
 
         let set_value = self.eval_expr(&set.expr)?;
-        object.set(set.property.clone(), set_value.clone());
+        instance.set(set.property.clone(), set_value.clone());
 
         Ok(set_value)
     }
@@ -406,38 +412,46 @@ impl Interpreter {
     fn eval_expr(&mut self, expr: &LocExpr) -> Result<Value> {
         match &expr.expr {
             Expr::Literal(value) => Ok(value.clone()),
+            Expr::Grouping(expr) => self.eval_expr(expr),
             Expr::Unary(unary) => self.eval_unary(unary),
             Expr::Binary(binary) => self.eval_binary(binary),
             Expr::Logical(binary) => self.eval_logical(binary),
-            Expr::Variable(var) | Expr::This(var) => Ok(self.get_symbol(expr.loc, &var)?),
+            Expr::Variable(var) | Expr::This(var) => self.get_symbol(&var).ok_or_else(|| {
+                error(expr.loc, &format!("Undefined symbol '{}'", var.name));
+                Error::UndefinedSymbol
+            }),
             Expr::Assign(assign) => {
                 let value = self.eval_expr(&assign.expr)?;
                 self.set_var(expr.loc, &assign.var, value.clone())?;
                 Ok(value)
             },
             Expr::Call(call) => self.eval_call(call),
-            Expr::GetProp(get) => self.eval_get(get),
+            Expr::GetProp(get) => self.eval_get(expr.loc, get),
             Expr::SetProp(set) => self.eval_set(set),
             Expr::Super(Super { var, method }) => {
-                let value = self.get_symbol(expr.loc, var)?;
-                let superclass = value.to_class(expr.loc)?;
+                let value = self.get_symbol(var).unwrap();
+                let superclass = value.to_class().unwrap();
 
                 if let Some(method) = superclass.get_method(&method) {
-                    // Scopes are structured such that "this" is always one scope closer than "super",
+                    // Scopes are structured such that 'this' is always one scope closer than 'super',
                     // which makes this hack possible.
-                    let depth = var.scope.get().get_relative().expect("'super' mustn't be in global scope") - 1;
-                    let value = self.scope.borrow().get_symbol_at(expr.loc, Class::THIS, depth)?;
-                    let this = value.to_instance(expr.loc)?.clone();
+                    let VarScope::Relative(depth) = var.scope.get() else {
+                        panic!("'super' mustn't be in global scope");
+                    };
+
+                    let value = self.scope.borrow().get_symbol_at(Class::THIS, depth - 1).unwrap();
+                    let this = value.to_instance().unwrap().clone();
+
                     Ok(Value::Callable(Rc::new(method.bind(this))))
                 } else {
-                    print_error(expr.loc, &format!("Undefined superclass method '{}'", method));
+                    error(expr.loc, &format!("Undefined superclass method '{}'", method));
                     Err(Error::UndefinedSymbol)
                 }
             },
         }
     }
 
-    fn fun_to_callable(&self, fun: &FunDecl, is_method: bool) -> Rc<Callable> {
+    fn eval_fun_decl(&self, fun: &FunDecl, is_method: bool) -> Rc<Callable> {
         Rc::new(Callable {
             name: fun.name.clone(),
             arity: fun.params.len(),
@@ -453,8 +467,9 @@ impl Interpreter {
     fn eval_stmt(&mut self, stmt: &Stmt) -> Result<()> {
         match stmt {
             Stmt::Expr(expr) => {
-                let _ = self.eval_expr(expr)?;
+                self.eval_expr(expr)?;
             },
+            Stmt::Print(expr) => println!("{}", self.eval_expr(expr)?.convert_to_string(false)),
             Stmt::Block(stmts) => {
                 let new_scope = Scope::new(self.scope.clone());
                 let prev_scope = mem::replace(&mut self.scope, new_scope);
@@ -486,31 +501,43 @@ impl Interpreter {
                     self.eval_stmt(body)?;
                 }
             },
-            Stmt::VarDecl(VarDecl { name_loc, name, init }) => {
-                let value = self.eval_expr(init)?;
-                self.define_symbol(*name_loc, name.clone(), value)?;
+            Stmt::VarDecl(var) => {
+                let value = self.eval_expr(&var.init)?;
+                self.define_symbol(var.name.clone(), value);
             },
             Stmt::FunDecl(fun) => {
-                let value = Value::Callable(self.fun_to_callable(fun, false));
-                self.define_symbol(fun.name_loc, fun.name.clone(), value)?;
+                let value = Value::Callable(self.eval_fun_decl(fun, false));
+                self.define_symbol(fun.name.clone(), value);
             },
             Stmt::Return(Return { loc: _, expr }) => {
                 let value = if let Some(expr) = expr {
                     self.eval_expr(expr)?
                 } else {
-                    Value::Null
+                    Value::Nil
                 };
                 return Err(Error::Return(value));
             },
             Stmt::ClassDecl(decl) => {
                 let prev_scope = self.scope.clone();
                 let superclass;
-                if let Some((loc, var)) = &decl.superclass {
-                    let value = self.get_symbol(*loc, var)?;
-                    let superclass_ref = value.to_class(*loc)?;
+                if let Some(Superclass { loc, var }) = &decl.superclass {
+                    let value = self.get_symbol(var).ok_or_else(|| {
+                        error(*loc, &format!("Undefined class '{}'", var.name));
+                        Error::UndefinedSymbol
+                    })?;
+                    let superclass_ref = value.to_class().ok_or_else(|| {
+                        error(
+                            *loc,
+                            &format!(
+                                "Expected superclass to be a class but found '{}'",
+                                value.convert_to_string(true)
+                            ),
+                        );
+                        Error::WrongType
+                    })?;
 
-                    self.scope = Scope::new(self.scope.clone()); // add "super" scope
-                    self.define_symbol(*loc, Class::SUPER.to_owned(), Value::Class(superclass_ref.clone()))?;
+                    self.scope = Scope::new(self.scope.clone()); // add 'super' scope
+                    self.define_symbol(Class::SUPER.to_owned(), Value::Class(superclass_ref.clone()));
 
                     superclass = Some(superclass_ref.clone());
                 } else {
@@ -519,31 +546,20 @@ impl Interpreter {
 
                 let mut methods = HashMap::new();
                 for method in &decl.methods {
-                    let value = self.fun_to_callable(method, true);
+                    let value = self.eval_fun_decl(method, true);
                     methods.insert(method.name.clone(), value);
                 }
 
                 if decl.superclass.is_some() {
-                    self.scope = prev_scope; // remove "super" scope
+                    self.scope = prev_scope; // remove 'super' scope
                 }
 
-                let arity = if let Some(initializer) = methods.get(Class::INITIALIZER_METHOD) {
-                    initializer.arity
-                } else {
-                    0
-                };
-
-                let class = Value::Class(Rc::new_cyclic(|class| Class {
+                let class = Value::Class(Rc::new(Class {
                     decl: decl.clone(),
                     methods,
                     superclass,
-                    constructor: Rc::new(Callable {
-                        name: decl.name.clone(),
-                        arity,
-                        fun: Function::Constructor(Constructor { class: class.clone() }),
-                    }),
                 }));
-                self.define_symbol(decl.name_loc, decl.name.clone(), class)?;
+                self.define_symbol(decl.name.clone(), class);
             },
         };
 
@@ -562,9 +578,7 @@ impl Interpreter {
         match self.eval_stmts(stmts) {
             Err(Error::Return(_)) => panic!("Return outside of function."),
             Err(err) => return Err(err),
-            Ok(_) => {},
-        };
-
-        Ok(())
+            Ok(_) => Ok(()),
+        }
     }
 }

@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
 use crate::{
-    error::{print_error, Loc},
-    parser::{Assign, Binary, Call, Expr, FunDecl, If, LocExpr, Return, Stmt, Super, Var, VarDecl, VarScope, While},
+    error::{error, Loc},
+    parser::{
+        Assign, Binary, Call, Expr, FunDecl, If, LocExpr, Return, Stmt, Super, Superclass, Var, VarDecl, VarScope,
+        While,
+    },
     value::Class,
 };
 
@@ -55,7 +58,7 @@ impl Resolver {
 
         if scope.insert(name.to_owned(), VarState::Declared).is_some() {
             self.had_error = true;
-            print_error(loc, &format!("Redeclaration of symbol '{}'", name));
+            error(loc, &format!("Redeclaration of symbol '{}'", name));
         }
     }
 
@@ -70,7 +73,7 @@ impl Resolver {
             .is_some_and(|state| state == VarState::Defined)
         {
             self.had_error = true;
-            print_error(loc, &format!("Redefinition of symbol '{}'", name));
+            error(loc, &format!("Redefinition of symbol '{}'", name));
         }
     }
 
@@ -81,7 +84,7 @@ impl Resolver {
                 match state {
                     VarState::Declared => {
                         self.had_error = true;
-                        print_error(loc, "Can't read variable in its own initializer");
+                        error(loc, &format!("Can't read variable '{}' in its own initializer", var.name));
                     },
                     VarState::Defined => var.scope.set(VarScope::Relative(depth)),
                 }
@@ -94,6 +97,7 @@ impl Resolver {
     fn resolve_expr(&mut self, expr: &LocExpr) {
         match &expr.expr {
             Expr::Literal(_) => {},
+            Expr::Grouping(expr) => self.resolve_expr(expr),
             Expr::Unary(unary) => self.resolve_expr(&unary.expr),
             Expr::Binary(Binary { left, op: _, right }) | Expr::Logical(Binary { left, op: _, right }) => {
                 self.resolve_expr(left);
@@ -110,15 +114,15 @@ impl Resolver {
                     self.resolve_expr(arg);
                 }
             },
-            Expr::GetProp(get) => self.resolve_expr(&get.object),
+            Expr::GetProp(get) => self.resolve_expr(&get.instance),
             Expr::SetProp(set) => {
                 self.resolve_expr(&set.expr);
-                self.resolve_expr(&set.object);
+                self.resolve_expr(&set.instance);
             },
             Expr::This(var) => {
                 if self.current_class == ClassType::None {
                     self.had_error = true;
-                    print_error(expr.loc, "'this' outside of class");
+                    error(expr.loc, "Can't use 'this' outside of class");
                 }
 
                 self.resolve_var(expr.loc, var);
@@ -126,10 +130,10 @@ impl Resolver {
             Expr::Super(Super { var, method: _ }) => {
                 if self.current_class == ClassType::None {
                     self.had_error = true;
-                    print_error(expr.loc, "'super' outside of class");
+                    error(expr.loc, "Can't use 'super' outside of class");
                 } else if self.current_class == ClassType::Class {
                     self.had_error = true;
-                    print_error(expr.loc, "'super' in a class without superclass");
+                    error(expr.loc, "Can't use 'super' in a class without superclass");
                 }
 
                 self.resolve_var(expr.loc, var);
@@ -158,7 +162,7 @@ impl Resolver {
 
     fn resolve_stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::Expr(expr) => self.resolve_expr(expr),
+            Stmt::Expr(expr) | Stmt::Print(expr) => self.resolve_expr(expr),
             Stmt::Block(stmts) => {
                 self.scopes.push(HashMap::new());
                 for stmt in stmts {
@@ -192,13 +196,13 @@ impl Resolver {
             Stmt::Return(Return { loc, expr }) => {
                 if self.current_fun == FunType::None {
                     self.had_error = true;
-                    print_error(*loc, "Return outside of function");
+                    error(*loc, "Return outside of function");
                 }
 
                 if let Some(expr) = expr {
                     if self.current_fun == FunType::Initializer {
                         self.had_error = true;
-                        print_error(expr.loc, "Can't return value from initializer ('init' method)");
+                        error(expr.loc, "Can't return value from initializer");
                     }
                     self.resolve_expr(expr);
                 }
@@ -207,22 +211,22 @@ impl Resolver {
                 self.define(decl.name_loc, &decl.name);
 
                 let prev_class = self.current_class;
-                if let Some((loc, superclass)) = &decl.superclass {
-                    if superclass.name == decl.name {
+                if let Some(Superclass { loc, var }) = &decl.superclass {
+                    if var.name == decl.name {
                         self.had_error = true;
-                        print_error(*loc, "Class can't inherit from itself");
+                        error(*loc, "Class can't inherit from itself");
                     } else {
-                        self.resolve_var(*loc, superclass);
+                        self.resolve_var(*loc, var);
                     }
 
-                    self.scopes.push(HashMap::new()); // add "super" scope
+                    self.scopes.push(HashMap::new()); // add 'super' scope
                     self.define(Loc::none(), Class::SUPER);
                     self.current_class = ClassType::Subclass;
                 } else {
                     self.current_class = ClassType::Class;
                 }
 
-                self.scopes.push(HashMap::new()); // add "this" scope
+                self.scopes.push(HashMap::new()); // add 'this' scope
                 self.define(Loc::none(), Class::THIS);
 
                 for method in &decl.methods {
@@ -235,10 +239,10 @@ impl Resolver {
                 }
                 self.current_class = prev_class;
 
-                self.scopes.pop(); // remove "this" scope
+                self.scopes.pop(); // remove 'this' scope
 
                 if decl.superclass.is_some() {
-                    self.scopes.pop(); // remove "super" scope
+                    self.scopes.pop(); // remove 'super' scope
                 }
             },
         }

@@ -1,27 +1,16 @@
 use std::{cell::Cell, rc::Rc};
 
 use crate::{
-    error::{error, print_error, Loc},
+    error::{error, Loc},
     lexer::{Token, TokenKind},
     value::{Class, Value},
 };
 
 impl Token {
-    fn to_error_string(&self) -> String {
-        match self.kind {
-            TokenKind::Number | TokenKind::String | TokenKind::Identifier => self.value.convert_to_string(true),
-            _ => self.kind.to_string().to_owned(),
-        }
-    }
-
-    fn type_expected_error<T>(&self, expected: &str) -> Result<T, ()> {
-        error(self.loc, &format!("Expected {expected} but found '{}'", self.to_error_string()))
-    }
-
-    fn to_identifier(&self) -> Result<String, ()> {
+    fn to_identifier(&self) -> Option<String> {
         match &self.value {
-            Value::Identifier(id) => Ok(id.clone()),
-            _ => self.type_expected_error("identifier"),
+            Value::Identifier(id) => Some(id.clone()),
+            _ => None,
         }
     }
 }
@@ -43,15 +32,6 @@ pub enum VarScope {
     Global,
     /// Number of scopes to go outwards from the current one.
     Relative(i32),
-}
-
-impl VarScope {
-    pub fn get_relative(&self) -> Option<i32> {
-        match self {
-            VarScope::Global => None,
-            VarScope::Relative(depth) => Some(*depth),
-        }
-    }
 }
 
 pub struct Var {
@@ -79,12 +59,12 @@ pub struct Call {
 }
 
 pub struct GetProp {
-    pub object: Box<LocExpr>,
+    pub instance: Box<LocExpr>,
     pub property: String,
 }
 
 pub struct SetProp {
-    pub object: Box<LocExpr>,
+    pub instance: Box<LocExpr>,
     pub property: String,
     pub expr: Box<LocExpr>,
 }
@@ -96,6 +76,7 @@ pub struct Super {
 
 pub enum Expr {
     Literal(Value),
+    Grouping(Box<LocExpr>),
     Unary(Unary),
     Binary(Binary),
     Logical(Binary),
@@ -118,6 +99,13 @@ impl LocExpr {
         Self {
             loc,
             expr: Expr::Literal(value),
+        }
+    }
+
+    fn new_grouping(loc: Loc, expr: Self) -> Self {
+        Self {
+            loc,
+            expr: Expr::Grouping(Box::new(expr)),
         }
     }
 
@@ -180,11 +168,11 @@ impl LocExpr {
         }
     }
 
-    fn new_get(loc: Loc, object: Self, property: String) -> Self {
+    fn new_get(loc: Loc, instance: Self, property: String) -> Self {
         Self {
             loc,
             expr: Expr::GetProp(GetProp {
-                object: Box::new(object),
+                instance: Box::new(instance),
                 property,
             }),
         }
@@ -192,9 +180,9 @@ impl LocExpr {
 
     fn new_set(get: GetProp, expr: Self) -> Self {
         Self {
-            loc: get.object.loc,
+            loc: get.instance.loc,
             expr: Expr::SetProp(SetProp {
-                object: get.object,
+                instance: get.instance,
                 property: get.property,
                 expr: Box::new(expr),
             }),
@@ -254,15 +242,21 @@ pub struct Return {
     pub expr: Option<LocExpr>,
 }
 
+pub struct Superclass {
+    pub loc: Loc,
+    pub var: Var,
+}
+
 pub struct ClassDecl {
     pub name_loc: Loc,
     pub name: String,
     pub methods: Vec<FunDecl>,
-    pub superclass: Option<(Loc, Var)>,
+    pub superclass: Option<Superclass>,
 }
 
 pub enum Stmt {
     Expr(LocExpr),
+    Print(LocExpr),
     Block(Vec<Stmt>),
     If(If),
     While(While),
@@ -374,13 +368,15 @@ impl Parser {
     /// Advances if the next token is of kind `kind` or returns error `error_message`.
     fn consume(&mut self, kind: TokenKind, error_message: &str) -> Result<Token, ()> {
         if self.is_done() {
-            return error(self.last_loc, error_message);
+            error(self.last_loc, error_message);
+            return Err(());
         }
 
         if self.is_next(kind) {
             Ok(self.advance().unwrap())
         } else {
-            error(self.tokens[self.index].loc, error_message)
+            error(self.tokens[self.index].loc, error_message);
+            Err(())
         }
     }
 
@@ -421,33 +417,40 @@ impl Parser {
 
     fn parse_primary(&mut self) -> Result<LocExpr, ()> {
         let Some(token) = self.advance() else {
-            return error(self.last_loc, "Expected expression");
+            error(self.last_loc, "Expected expression but reached the end");
+            return Err(());
         };
 
         match token.kind {
             TokenKind::Number | TokenKind::String => Ok(LocExpr::new_literal(token.loc, token.value)),
             TokenKind::False => Ok(LocExpr::new_literal(token.loc, Value::Bool(false))),
             TokenKind::True => Ok(LocExpr::new_literal(token.loc, Value::Bool(true))),
-            TokenKind::Null => Ok(LocExpr::new_literal(token.loc, Value::Null)),
-            TokenKind::Identifier => Ok(LocExpr::new_var(token.loc, token.to_identifier()?)),
+            TokenKind::Nil => Ok(LocExpr::new_literal(token.loc, Value::Nil)),
+            TokenKind::Identifier => Ok(LocExpr::new_var(token.loc, token.to_identifier().unwrap())),
             TokenKind::This => Ok(LocExpr::new_this(token.loc)),
             TokenKind::Super => {
                 self.consume(
                     TokenKind::Dot,
-                    "Expected '.' after 'super'. 'super' can only be used to access methods",
+                    "Expected '.' after 'super', 'super' can only be used to access methods",
                 )?;
                 let method_token = self.consume(
                     TokenKind::Identifier,
-                    "Expected method name (an identifier) after 'super'. 'super' can only be used to access methods",
+                    "Expected method name after 'super', 'super' can only be used to access methods",
                 )?;
-                Ok(LocExpr::new_super(token.loc, method_token.to_identifier()?))
+                Ok(LocExpr::new_super(token.loc, method_token.to_identifier().unwrap()))
             },
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
                 self.consume(TokenKind::RightParen, "Unclosed '(', expected ')'")?;
-                Ok(expr)
+                Ok(LocExpr::new_grouping(token.loc, expr))
             },
-            _ => error(token.loc, "Expected expression"),
+            _ => {
+                error(
+                    token.loc,
+                    &format!("Expected expression but found '{}'", token.kind.to_string()),
+                );
+                Err(())
+            },
         }
     }
 
@@ -458,16 +461,17 @@ impl Parser {
             return Ok(args);
         }
 
+        let mut error_loc = Loc::none();
         args.push(self.parse_expr()?);
-        while args.len() < Self::MAX_ARGS && self.try_consume(TokenKind::Comma) {
+        while self.try_consume(TokenKind::Comma) {
+            if args.len() == Self::MAX_ARGS {
+                error_loc = self.tokens[self.index - 1].loc;
+            }
             args.push(self.parse_expr()?);
         }
-        if self.is_next(TokenKind::Comma) {
+        if args.len() > Self::MAX_ARGS {
             self.had_error = true;
-            print_error(
-                self.tokens[self.index + 1].loc,
-                &format!("Max number of arguments is {}", Self::MAX_ARGS),
-            );
+            error(error_loc, &format!("Max number of arguments is {}", Self::MAX_ARGS));
         }
         self.consume(TokenKind::RightParen, "Unclosed '(', expected ')' after the arguments")?;
 
@@ -484,8 +488,8 @@ impl Parser {
                     expr = LocExpr::new_call(expr, args);
                 },
                 TokenKind::Dot => {
-                    let prop_token = self.consume(TokenKind::Identifier, "Expected property after '.'")?;
-                    expr = LocExpr::new_get(prop_token.loc, expr, prop_token.to_identifier()?);
+                    let property = self.consume(TokenKind::Identifier, "Expected property name after '.'")?;
+                    expr = LocExpr::new_get(property.loc, expr, property.to_identifier().unwrap());
                 },
                 _ => {
                     self.back();
@@ -563,7 +567,7 @@ impl Parser {
     fn parse_logic_and(&mut self) -> Result<LocExpr, ()> {
         let mut expr = self.parse_equality()?;
 
-        while self.is_next(TokenKind::AndAnd) {
+        while self.is_next(TokenKind::And) {
             let op = self.advance().unwrap();
             let right = self.parse_equality()?;
             expr = LocExpr::new_logical(expr, op, right);
@@ -575,7 +579,7 @@ impl Parser {
     fn parse_logic_or(&mut self) -> Result<LocExpr, ()> {
         let mut expr = self.parse_logic_and()?;
 
-        while self.is_next(TokenKind::PipePipe) {
+        while self.is_next(TokenKind::Or) {
             let op = self.advance().unwrap();
             let right = self.parse_logic_and()?;
             expr = LocExpr::new_logical(expr, op, right);
@@ -588,24 +592,19 @@ impl Parser {
         let l_expr = self.parse_logic_or()?;
 
         if self.try_consume(TokenKind::Equal) {
+            let r_expr = self.parse_expr()?;
             match l_expr.expr {
-                Expr::Variable(var) => {
-                    let r_expr = self.parse_expr()?;
-                    Ok(LocExpr::new_assign(l_expr.loc, var.name, r_expr))
-                },
-                Expr::GetProp(get) => {
-                    let r_expr = self.parse_expr()?;
-                    Ok(LocExpr::new_set(get, r_expr))
-                },
+                Expr::Variable(var) => Ok(LocExpr::new_assign(l_expr.loc, var.name, r_expr)),
+                Expr::GetProp(get) => Ok(LocExpr::new_set(get, r_expr)),
                 _ => {
                     // Parser is still in a valid state that doesn't require syncing.
                     // Instead of returning `Err`, that triggers `sync()`, we print the error,
-                    // set `had_error` and return `null` value since it won't be used anyways.
+                    // set `had_error` and return `nil` value since it won't be used anyways.
                     self.had_error = true;
-                    print_error(l_expr.loc, "Invalid l-value");
+                    error(l_expr.loc, "Invalid assignment target");
                     Ok(LocExpr {
                         loc: Loc::none(),
-                        expr: Expr::Literal(Value::Null),
+                        expr: Expr::Literal(Value::Nil),
                     })
                 },
             }
@@ -620,9 +619,17 @@ impl Parser {
 
     fn parse_expr_stmt(&mut self) -> Result<Stmt, ()> {
         let expr = self.parse_expr()?;
-        self.consume(TokenKind::Semicolon, "Expected semicolon after the statement")?;
+        self.consume(TokenKind::Semicolon, "Expected semicolon after the expression")?;
 
         Ok(Stmt::Expr(expr))
+    }
+
+    fn parse_print_stmt(&mut self) -> Result<Stmt, ()> {
+        self.expect(TokenKind::Print);
+        let expr = self.parse_expr()?;
+        self.consume(TokenKind::Semicolon, "Expected semicolon after the print statement")?;
+
+        Ok(Stmt::Print(expr))
     }
 
     fn parse_if_stmt(&mut self) -> Result<Stmt, ()> {
@@ -741,6 +748,7 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<Stmt, ()> {
         match self.peek().unwrap().kind {
+            TokenKind::Print => self.parse_print_stmt(),
             TokenKind::If => self.parse_if_stmt(),
             TokenKind::While => self.parse_while_stmt(),
             TokenKind::For => self.parse_for_stmt(),
@@ -752,9 +760,9 @@ impl Parser {
 
     fn parse_var_decl(&mut self) -> Result<Stmt, ()> {
         self.expect(TokenKind::Var);
-        let name_token = self.consume(TokenKind::Identifier, "Expected identifier after 'var'")?;
+        let name_token = self.consume(TokenKind::Identifier, "Expected a variable name after 'var'")?;
 
-        let mut init = LocExpr::new_literal(Loc::none(), Value::Null);
+        let mut init = LocExpr::new_literal(Loc::none(), Value::Nil);
         if self.try_consume(TokenKind::Equal) {
             init = self.parse_expr()?;
         }
@@ -762,7 +770,7 @@ impl Parser {
 
         Ok(Stmt::VarDecl(VarDecl {
             name_loc: name_token.loc,
-            name: name_token.to_identifier()?,
+            name: name_token.to_identifier().unwrap(),
             init,
         }))
     }
@@ -772,7 +780,7 @@ impl Parser {
 
         Ok(FunParam {
             loc: param_token.loc,
-            name: param_token.to_identifier()?,
+            name: param_token.to_identifier().unwrap(),
         })
     }
 
@@ -783,16 +791,17 @@ impl Parser {
             return Ok(params);
         }
 
+        let mut error_loc = Loc::none();
         params.push(self.parse_param()?);
-        while params.len() < Self::MAX_ARGS && self.try_consume(TokenKind::Comma) {
+        while self.try_consume(TokenKind::Comma) {
+            if params.len() == Self::MAX_ARGS {
+                error_loc = self.tokens[self.index - 1].loc;
+            }
             params.push(self.parse_param()?);
         }
-        if self.is_next(TokenKind::Comma) {
+        if params.len() > Self::MAX_ARGS {
             self.had_error = true;
-            print_error(
-                self.tokens[self.index + 1].loc,
-                &format!("Max number of parameters is {}", Self::MAX_ARGS),
-            );
+            error(error_loc, &format!("Max number of parameters is {}", Self::MAX_ARGS));
         }
         self.consume(TokenKind::RightParen, "Unclosed '(', expected ')' after the parameters")?;
 
@@ -817,13 +826,14 @@ impl Parser {
         let params = self.parse_params()?;
 
         if !self.is_next(TokenKind::LeftBrace) {
-            return error(self.loc_after_prev(), &format!("Expected '{{' before {} body", type_name));
+            error(self.loc_after_prev(), &format!("Expected '{{' before {} body", type_name));
+            return Err(());
         }
         let body = Rc::new(self.parse_block()?);
 
         Ok(FunDecl {
             name_loc: name_token.loc,
-            name: name_token.to_identifier()?,
+            name: name_token.to_identifier().unwrap(),
             params,
             body,
         })
@@ -842,8 +852,12 @@ impl Parser {
 
         let superclass;
         if self.try_consume(TokenKind::Less) {
-            let token = self.consume(TokenKind::Identifier, "Expected a superclass name (an identifier) after '<'")?;
-            superclass = Some((token.loc, Var::new(token.to_identifier()?)));
+            let token = self.consume(TokenKind::Identifier, "Expected a superclass name after '<'")?;
+
+            superclass = Some(Superclass {
+                loc: token.loc,
+                var: Var::new(token.to_identifier().unwrap()),
+            });
         } else {
             superclass = None;
         }
@@ -858,7 +872,7 @@ impl Parser {
         Ok(Stmt::ClassDecl(Rc::new(ClassDecl {
             name_loc: name_token.loc,
             superclass,
-            name: name_token.to_identifier()?,
+            name: name_token.to_identifier().unwrap(),
             methods,
         })))
     }

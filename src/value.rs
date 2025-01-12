@@ -1,8 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    rc::{Rc, Weak},
-};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     interpreter::Scope,
@@ -18,14 +14,9 @@ pub struct LoxFun {
     pub closure: Rc<RefCell<Scope>>,
 }
 
-pub struct Constructor {
-    pub class: Weak<Class>,
-}
-
 pub enum Function {
     Native(NativeFun),
     Lox(LoxFun),
-    Constructor(Constructor),
 }
 
 pub struct Callable {
@@ -39,7 +30,6 @@ pub struct Class {
     pub decl: Rc<ClassDecl>,
     pub methods: HashMap<String, Rc<Callable>>,
     pub superclass: Option<Rc<Class>>,
-    pub constructor: Rc<Callable>,
 }
 
 impl Class {
@@ -59,21 +49,21 @@ impl Class {
     }
 }
 
-pub struct Object {
+pub struct Instance {
     pub class: Rc<Class>,
     pub fields: RefCell<HashMap<String, Value>>,
 }
 
 #[derive(Clone)]
 pub enum Value {
-    Null,
+    Nil,
     Bool(bool),
     Number(f64),
     String(String),
     Identifier(String),
     Callable(Rc<Callable>),
     Class(Rc<Class>),
-    Object(Rc<Object>),
+    Instance(Rc<Instance>),
 }
 
 impl Value {
@@ -90,10 +80,10 @@ impl Value {
             },
             Value::Identifier(identifier) => identifier.clone(),
             Value::Bool(bool) => bool.to_string(),
-            Value::Null => "null".to_owned(),
-            Value::Callable(callable) => format!("<fun {}>", callable.name),
+            Value::Nil => "nil".to_owned(),
+            Value::Callable(callable) => format!("<fn {}>", callable.name),
             Value::Class(class) => class.decl.name.clone(),
-            Value::Object(object) => format!("<{} object>", object.class.decl.name),
+            Value::Instance(instance) => format!("{} instance", instance.class.decl.name),
         }
     }
 
@@ -104,11 +94,11 @@ impl Value {
             (Value::String(this), Value::String(other)) => this == other,
             (Value::Identifier(this), Value::Identifier(other)) => this == other,
             (Value::Bool(this), Value::Bool(other)) => this == other,
-            (Value::Null, Value::Null) => true,
+            (Value::Nil, Value::Nil) => true,
             // by pointer
             (Value::Callable(this), Value::Callable(other)) => Rc::ptr_eq(this, other),
             (Value::Class(this), Value::Class(other)) => Rc::ptr_eq(this, other),
-            (Value::Object(this), Value::Object(other)) => Rc::ptr_eq(this, other),
+            (Value::Instance(this), Value::Instance(other)) => Rc::ptr_eq(this, other),
             // Values of different types can't be equal.
             _ => false,
         }
