@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 BIN="./target/debug/rlox"
 
@@ -35,3 +35,7 @@ echo ""
 echo "Total:"
 echo -e "\tPassed: $passed"
 echo -e "\tFailed: $failed"
+
+if [[ $failed > 0 ]]; then
+    exit 1
+fi
