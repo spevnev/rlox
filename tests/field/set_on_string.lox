@@ -1,0 +1,1 @@
+"str".foo = "value"; // [ERROR] Property assigning expected instance but found '"str"' at 1:1.

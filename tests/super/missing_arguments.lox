@@ -1,0 +1,13 @@
+class Base {
+  foo(a, b) {
+    print "Base.foo(" + a + ", " + b + ")";
+  }
+}
+
+class Derived < Base {
+  foo() {
+    super.foo(1); // [ERROR] Expected 2 arguments but got 1 at 9:5.
+  }
+}
+
+Derived().foo();

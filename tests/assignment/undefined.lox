@@ -1,0 +1,1 @@
+unknown = "what"; // [ERROR] Assigning to undefined variable 'unknown' at 1:1.

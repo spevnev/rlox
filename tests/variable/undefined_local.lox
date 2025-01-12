@@ -1,0 +1,3 @@
+{
+  print notDefined;  // [ERROR] Undefined symbol 'notDefined' at 2:9.
+}

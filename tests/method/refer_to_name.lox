@@ -1,0 +1,7 @@
+class Foo {
+  method() {
+    print method; // [ERROR] Undefined symbol 'method' at 3:11.
+  }
+}
+
+Foo().method();

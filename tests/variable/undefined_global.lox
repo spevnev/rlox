@@ -1,0 +1,1 @@
+print notDefined; // [ERROR] Undefined symbol 'notDefined' at 1:7.

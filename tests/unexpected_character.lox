@@ -1,0 +1,2 @@
+// [ERROR] Unknown character '|' at 2:7.
+foo(a | b);

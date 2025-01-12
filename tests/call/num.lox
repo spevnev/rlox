@@ -1,0 +1,1 @@
+123(); // [ERROR] Expected function or constructor but found '123' at 1:1.

@@ -1,0 +1,1 @@
+print; // [ERROR] Expected expression but found ';' at 1:6.

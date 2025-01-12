@@ -1,0 +1,3 @@
+{
+  class Foo < Foo {} // [ERROR] Class can't inherit from itself at 2:15.
+}

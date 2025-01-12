@@ -1,0 +1,1 @@
+"str"(); // [ERROR] Expected function or constructor but found '"str"' at 1:1.

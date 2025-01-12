@@ -1,0 +1,4 @@
+var a = "outer";
+{
+  var a = a; // [ERROR] Can't read variable 'a' in its own initializer at 3:11.
+}

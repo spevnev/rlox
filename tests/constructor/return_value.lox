@@ -1,0 +1,5 @@
+class Foo {
+  init() {
+    return "result"; // [ERROR] Can't return value from initializer at 3:12.
+  }
+}

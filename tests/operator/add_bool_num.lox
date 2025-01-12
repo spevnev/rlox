@@ -1,0 +1,1 @@
+true + 123; // [ERROR] Expected number but found 'true' at 1:1.

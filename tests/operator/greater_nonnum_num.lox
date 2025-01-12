@@ -1,0 +1,1 @@
+"1" > 1; // [ERROR] Expected number but found '"1"' at 1:1.

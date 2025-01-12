@@ -1,0 +1,4 @@
+fun foo(arg,
+        arg) { // [ERROR] Redefinition of symbol 'arg' at 2:9.
+  "body";
+}

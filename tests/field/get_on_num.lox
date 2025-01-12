@@ -1,0 +1,1 @@
+123.foo; // [ERROR] Property access expected instance but found '123' at 1:1.

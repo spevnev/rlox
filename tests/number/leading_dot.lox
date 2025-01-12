@@ -1,0 +1,1 @@
+.123; // [ERROR] Expected expression but found '.' at 1:1.

@@ -1,0 +1,1 @@
+true(); // [ERROR] Expected function or constructor but found 'true' at 1:1.

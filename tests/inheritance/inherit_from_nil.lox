@@ -1,0 +1,2 @@
+var Nil = nil;
+class Foo < Nil {} // [ERROR] Expected superclass to be a class but found 'nil' at 2:13.
