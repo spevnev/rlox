@@ -41,9 +41,7 @@ impl Callable {
         match &self.fun {
             Function::Lox(fun) => {
                 let instance_closure = Scope::new(fun.closure.clone());
-                instance_closure
-                    .borrow_mut()
-                    .define_symbol(Class::THIS.to_owned(), Value::Instance(instance));
+                instance_closure.define_symbol(Class::THIS.to_owned(), Value::Instance(instance));
 
                 Callable {
                     name: self.name.clone(),
@@ -126,49 +124,39 @@ impl Value {
 }
 
 pub struct Scope {
-    parent: Option<Rc<RefCell<Scope>>>,
-    symbols: AHashMap<String, Value>,
+    parent: Option<Rc<Scope>>,
+    symbols: RefCell<AHashMap<String, Value>>,
 }
 
 impl Scope {
-    fn new(parent: Rc<RefCell<Self>>) -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self {
+    fn new(parent: Rc<Self>) -> Rc<Self> {
+        Rc::new(Self {
             parent: Some(parent),
-            symbols: AHashMap::new(),
-        }))
+            symbols: RefCell::new(AHashMap::new()),
+        })
     }
 
-    fn new_global() -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self {
+    fn new_global() -> Rc<Self> {
+        Rc::new(Self {
             parent: None,
-            symbols: get_native_functions_as_symbols(),
-        }))
+            symbols: RefCell::new(get_native_functions_as_symbols()),
+        })
     }
 
-    fn define_symbol(&mut self, name: String, value: Value) {
-        self.symbols.insert(name, value);
+    fn define_symbol(&self, name: String, value: Value) {
+        self.symbols.borrow_mut().insert(name, value);
     }
 
     fn get_symbol(&self, name: &str) -> Option<Value> {
-        if let Some(value) = self.symbols.get(name) {
+        if let Some(value) = self.symbols.borrow().get(name) {
             Some(value.clone())
         } else {
             None
         }
     }
 
-    fn get_symbol_at(&self, name: &str, depth: i32) -> Option<Value> {
-        if depth == 0 {
-            self.get_symbol(name)
-        } else if let Some(parent) = &self.parent {
-            parent.borrow().get_symbol_at(name, depth - 1)
-        } else {
-            panic!("Scope has no parent.");
-        }
-    }
-
-    fn set_var(&mut self, loc: Loc, name: &str, value: Value) -> Result<()> {
-        if let Some(var) = self.symbols.get_mut(name) {
+    fn set_var(&self, loc: Loc, name: &str, value: Value) -> Result<()> {
+        if let Some(var) = self.symbols.borrow_mut().get_mut(name) {
             *var = value;
             Ok(())
         } else {
@@ -176,21 +164,11 @@ impl Scope {
             Err(Error::UndefinedSymbol)
         }
     }
-
-    fn set_var_at(&mut self, loc: Loc, name: &str, value: Value, depth: i32) -> Result<()> {
-        if depth == 0 {
-            self.set_var(loc, name, value)
-        } else if let Some(parent) = &self.parent {
-            parent.borrow_mut().set_var_at(loc, name, value, depth - 1)
-        } else {
-            panic!("Scope has no parent.");
-        }
-    }
 }
 
 pub struct Interpreter {
-    global: Rc<RefCell<Scope>>,
-    scope: Rc<RefCell<Scope>>,
+    global: Rc<Scope>,
+    scope: Rc<Scope>,
 }
 
 impl Interpreter {
@@ -202,21 +180,29 @@ impl Interpreter {
         }
     }
 
+    fn get_nth_scope(&self, depth: i32) -> &Rc<Scope> {
+        let mut current = &self.scope;
+        for _ in 0..depth {
+            current = current.parent.as_ref().unwrap();
+        }
+        current
+    }
+
     fn define_symbol(&self, name: String, value: Value) {
-        self.scope.borrow_mut().define_symbol(name, value);
+        self.scope.define_symbol(name, value);
     }
 
     fn get_symbol(&self, var: &Var) -> Option<Value> {
         match var.scope.get() {
-            VarScope::Global => self.global.borrow().get_symbol(&var.name),
-            VarScope::Relative(depth) => self.scope.borrow().get_symbol_at(&var.name, depth),
+            VarScope::Global => self.global.get_symbol(&var.name),
+            VarScope::Relative(depth) => self.get_nth_scope(depth).get_symbol(&var.name),
         }
     }
 
     fn set_var(&mut self, loc: Loc, var: &Var, value: Value) -> Result<()> {
         match var.scope.get() {
-            VarScope::Global => self.global.borrow_mut().set_var(loc, &var.name, value),
-            VarScope::Relative(depth) => self.scope.borrow_mut().set_var_at(loc, &var.name, value, depth),
+            VarScope::Global => self.global.set_var(loc, &var.name, value),
+            VarScope::Relative(depth) => self.get_nth_scope(depth).set_var(loc, &var.name, value),
         }
     }
 
@@ -313,7 +299,7 @@ impl Interpreter {
 
         self.scope = prev_scope;
         if fun.is_initializer {
-            Ok(fun.closure.borrow().get_symbol(Class::THIS).unwrap())
+            Ok(fun.closure.get_symbol(Class::THIS).unwrap())
         } else {
             Ok(result)
         }
@@ -441,7 +427,7 @@ impl Interpreter {
                         panic!("'super' mustn't be in global scope");
                     };
 
-                    let value = self.scope.borrow().get_symbol_at(Class::THIS, depth - 1).unwrap();
+                    let value = self.get_nth_scope(depth - 1).get_symbol(Class::THIS).unwrap();
                     let this = value.to_instance().unwrap().clone();
 
                     Ok(Value::Callable(Rc::new(method.bind(this))))

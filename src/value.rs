@@ -13,7 +13,7 @@ pub struct LoxFun {
     pub is_initializer: bool,
     pub params: Vec<FunParam>,
     pub body: Rc<Vec<Stmt>>,
-    pub closure: Rc<RefCell<Scope>>,
+    pub closure: Rc<Scope>,
 }
 
 pub enum Function {
