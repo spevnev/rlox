@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 use crate::{
     error::{error, Loc},
@@ -34,7 +34,7 @@ struct Resolver {
     had_error: bool,
     current_fun: FunType,
     current_class: ClassType,
-    scopes: Vec<HashMap<String, VarState>>,
+    scopes: Vec<AHashMap<String, VarState>>,
 }
 
 /// Resolver binds local variables to specific instances by settings their `scope`.
@@ -144,7 +144,7 @@ impl Resolver {
     fn resolve_fun(&mut self, fun: &FunDecl, fun_type: FunType) {
         self.define(fun.name_loc, &fun.name);
 
-        self.scopes.push(HashMap::new());
+        self.scopes.push(AHashMap::new());
 
         for param in &fun.params {
             self.define(param.loc, &param.name);
@@ -164,7 +164,7 @@ impl Resolver {
         match stmt {
             Stmt::Expr(expr) | Stmt::Print(expr) => self.resolve_expr(expr),
             Stmt::Block(stmts) => {
-                self.scopes.push(HashMap::new());
+                self.scopes.push(AHashMap::new());
                 for stmt in stmts {
                     self.resolve_stmt(stmt);
                 }
@@ -219,14 +219,14 @@ impl Resolver {
                         self.resolve_var(*loc, var);
                     }
 
-                    self.scopes.push(HashMap::new()); // add 'super' scope
+                    self.scopes.push(AHashMap::new()); // add 'super' scope
                     self.define(Loc::none(), Class::SUPER);
                     self.current_class = ClassType::Subclass;
                 } else {
                     self.current_class = ClassType::Class;
                 }
 
-                self.scopes.push(HashMap::new()); // add 'this' scope
+                self.scopes.push(AHashMap::new()); // add 'this' scope
                 self.define(Loc::none(), Class::THIS);
 
                 for method in &decl.methods {

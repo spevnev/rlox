@@ -1,4 +1,6 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
+
+use ahash::AHashMap;
 
 use crate::{
     interpreter::Scope,
@@ -28,7 +30,7 @@ pub struct Callable {
 
 pub struct Class {
     pub decl: Rc<ClassDecl>,
-    pub methods: HashMap<String, Rc<Callable>>,
+    pub methods: AHashMap<String, Rc<Callable>>,
     pub superclass: Option<Rc<Class>>,
 }
 
@@ -51,7 +53,7 @@ impl Class {
 
 pub struct Instance {
     pub class: Rc<Class>,
-    pub fields: RefCell<HashMap<String, Value>>,
+    pub fields: RefCell<AHashMap<String, Value>>,
 }
 
 #[derive(Clone)]

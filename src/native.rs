@@ -1,8 +1,9 @@
 use std::{
-    collections::HashMap,
     rc::Rc,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+use ahash::AHashMap;
 
 use crate::value::{Callable, Function, NativeFun, Value};
 
@@ -17,8 +18,8 @@ const NATIVE_FUNCTIONS: [(&'static str, usize, NativeFun); 1] = [
     ("clock", 0, clock),
 ];
 
-pub fn get_native_functions_as_symbols() -> HashMap<String, Value> {
-    HashMap::from(NATIVE_FUNCTIONS.map(|(name, arity, fun)| {
+pub fn get_native_functions_as_symbols() -> AHashMap<String, Value> {
+    AHashMap::from(NATIVE_FUNCTIONS.map(|(name, arity, fun)| {
         (
             name.to_owned(),
             Value::Callable(Rc::new(Callable {

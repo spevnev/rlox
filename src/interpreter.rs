@@ -1,4 +1,6 @@
-use std::{cell::RefCell, collections::HashMap, fmt::Debug, mem, rc::Rc};
+use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
+
+use ahash::AHashMap;
 
 use crate::{
     error::{error, Loc},
@@ -125,14 +127,14 @@ impl Value {
 
 pub struct Scope {
     parent: Option<Rc<RefCell<Scope>>>,
-    symbols: HashMap<String, Value>,
+    symbols: AHashMap<String, Value>,
 }
 
 impl Scope {
     fn new(parent: Rc<RefCell<Self>>) -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(Self {
             parent: Some(parent),
-            symbols: HashMap::new(),
+            symbols: AHashMap::new(),
         }))
     }
 
@@ -340,7 +342,7 @@ impl Interpreter {
     fn eval_constructor(&mut self, call: &Call, class: Rc<Class>) -> Result<Value> {
         let instance = Rc::new(Instance {
             class: class.clone(),
-            fields: RefCell::new(HashMap::new()),
+            fields: RefCell::new(AHashMap::new()),
         });
 
         if let Some(initializer) = class.get_method(Class::INITIALIZER_METHOD) {
@@ -544,7 +546,7 @@ impl Interpreter {
                     superclass = None;
                 }
 
-                let mut methods = HashMap::new();
+                let mut methods = AHashMap::new();
                 for method in &decl.methods {
                     let value = self.eval_fun_decl(method, true);
                     methods.insert(method.name.clone(), value);
