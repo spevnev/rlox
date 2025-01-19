@@ -59,24 +59,6 @@ impl Callable {
     }
 }
 
-impl Instance {
-    // TODO: Self? don't pass this.
-    fn get(&self, this: Rc<Instance>, property_loc: Loc, property: &str) -> Result<Value> {
-        if let Some(value) = self.fields.borrow().get(property) {
-            Ok(value.clone())
-        } else if let Some(method) = self.class.get_method(property) {
-            Ok(Value::Callable(Rc::new(method.bind(this))))
-        } else {
-            error(property_loc, &format!("Undefined property '{}'", property));
-            Err(Error::UndefinedSymbol)
-        }
-    }
-
-    fn set(&self, property: String, value: Value) {
-        self.fields.borrow_mut().insert(property, value);
-    }
-}
-
 impl Value {
     fn type_expected_error<T>(&self, loc: Loc, expected: &str) -> Result<T> {
         error(
@@ -314,14 +296,14 @@ impl Interpreter {
             return Err(Error::WrongArity);
         }
 
-        let mut arg_values = Vec::new();
+        let mut args = Vec::new();
         for arg in &call.args {
-            arg_values.push(self.eval_expr(arg)?);
+            args.push(self.eval_expr(arg)?);
         }
 
         match &callable.fun {
-            Function::Native(fun) => Ok(fun(arg_values)),
-            Function::Lox(fun) => self.eval_lox_fun(fun, arg_values),
+            Function::Native(fun) => Ok(fun(args)),
+            Function::Lox(fun) => self.eval_lox_fun(fun, args),
         }
     }
 
@@ -374,8 +356,16 @@ impl Interpreter {
             );
             Error::WrongType
         })?;
-        let property = instance.get(instance.clone(), loc, &get.property)?;
-        Ok(property.clone())
+
+        let fields = instance.fields.borrow();
+        if let Some(value) = fields.get(&get.property) {
+            Ok(value.clone())
+        } else if let Some(method) = instance.class.get_method(&get.property) {
+            Ok(Value::Callable(Rc::new(method.bind(instance.clone()))))
+        } else {
+            error(loc, &format!("Undefined property '{}'", &get.property));
+            Err(Error::UndefinedSymbol)
+        }
     }
 
     fn eval_set(&mut self, set: &SetProp) -> Result<Value> {
@@ -392,7 +382,7 @@ impl Interpreter {
         })?;
 
         let set_value = self.eval_expr(&set.expr)?;
-        instance.set(set.property.clone(), set_value.clone());
+        instance.fields.borrow_mut().insert(set.property.clone(), set_value.clone());
 
         Ok(set_value)
     }
