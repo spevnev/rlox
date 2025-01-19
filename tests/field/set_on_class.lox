@@ -1,2 +1,2 @@
 class Foo {}
-Foo.bar = "value"; // [ERROR] Property assigning expected instance but found 'Foo' at 2:1.
+Foo.bar = "value"; // [ERROR] Property assignment expected instance but found 'Foo' at 2:1.

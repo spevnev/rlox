@@ -4,7 +4,7 @@ use ahash::AHashMap;
 
 use crate::{
     interpreter::Scope,
-    parser::{ClassDecl, FunParam, Stmt},
+    parser::{FunParam, Stmt},
 };
 
 pub type NativeFun = fn(args: Vec<Value>) -> Value;
@@ -29,7 +29,7 @@ pub struct Callable {
 }
 
 pub struct Class {
-    pub decl: Rc<ClassDecl>,
+    pub name: String,
     pub methods: AHashMap<String, Rc<Callable>>,
     pub superclass: Option<Rc<Class>>,
 }
@@ -69,23 +69,23 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn convert_to_string(&self, quote_string: bool) -> String {
+    pub fn convert_to_string(&self) -> String {
         match self {
             Value::Number(number) => number.to_string(),
-            Value::String(string) => {
-                // Quoting differentiates identifier and string in error messages.
-                if quote_string {
-                    format!("\"{string}\"")
-                } else {
-                    string.clone()
-                }
-            },
+            Value::String(string) => string.clone(),
             Value::Identifier(identifier) => identifier.clone(),
             Value::Bool(bool) => bool.to_string(),
             Value::Nil => "nil".to_owned(),
             Value::Callable(callable) => format!("<fn {}>", callable.name),
-            Value::Class(class) => class.decl.name.clone(),
-            Value::Instance(instance) => format!("{} instance", instance.class.decl.name),
+            Value::Class(class) => class.name.clone(),
+            Value::Instance(instance) => format!("{} instance", instance.class.name),
+        }
+    }
+
+    pub fn error_to_string(&self) -> String {
+        match self {
+            Value::String(string) => format!("\"{string}\""),
+            _ => self.convert_to_string(),
         }
     }
 

@@ -1,2 +1,2 @@
-// [ERROR] Expected property name after '.' at 2:5.
+// [ERROR] Expected a property name after '.' at 2:5.
 123.

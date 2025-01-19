@@ -1,6 +1,6 @@
 class Base {
   foo() {
-    super.doesNotExist; // [ERROR] Can't use 'super' in a class without superclass at 3:5.
+    super.doesNotExist; // [ERROR] Cannot use 'super' in a class without superclass at 3:5.
   }
 }
 

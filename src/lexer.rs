@@ -114,10 +114,6 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "while"  => TokenKind::While
 };
 
-
-
-
-
 #[derive(Clone)]
 pub struct Token {
     pub kind: TokenKind,
@@ -131,6 +127,13 @@ impl Token {
         let mut end_loc = self.loc;
         end_loc.column += self.len;
         end_loc
+    }
+
+    pub fn to_identifier(&self) -> String {
+        match &self.value {
+            Value::Identifier(id) => id.clone(),
+            _ => panic!("Expected Token to be an Identifier."),
+        }
     }
 }
 

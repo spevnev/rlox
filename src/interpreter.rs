@@ -7,8 +7,8 @@ use crate::{
     lexer::TokenKind,
     native::get_native_functions_as_symbols,
     parser::{
-        Binary, Call, Expr, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Super, Superclass, Unary, Var,
-        VarScope, While,
+        Binary, Call, ClassDecl, Expr, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Super, Superclass, Unary,
+        Var, VarScope, While,
     },
     value::{Callable, Class, Function, Instance, LoxFun, Value},
 };
@@ -35,75 +35,6 @@ impl Debug for Error {
 }
 
 type Result<V, E = Error> = std::result::Result<V, E>;
-
-impl Callable {
-    fn bind(&self, instance: Rc<Instance>) -> Callable {
-        match &self.fun {
-            Function::Lox(fun) => {
-                let instance_closure = Scope::new(fun.closure.clone());
-                instance_closure.define_symbol(Class::THIS.to_owned(), Value::Instance(instance));
-
-                Callable {
-                    name: self.name.clone(),
-                    arity: self.arity,
-                    fun: Function::Lox(LoxFun {
-                        is_initializer: fun.is_initializer,
-                        params: fun.params.clone(),
-                        body: fun.body.clone(),
-                        closure: instance_closure,
-                    }),
-                }
-            },
-            _ => panic!(), // TODO:
-        }
-    }
-}
-
-impl Value {
-    fn type_expected_error<T>(&self, loc: Loc, expected: &str) -> Result<T> {
-        error(
-            loc,
-            &format!("Expected {expected} but found '{}'", self.convert_to_string(true)),
-        );
-        Err(Error::WrongType)
-    }
-
-    fn is_string(&self) -> bool {
-        match self {
-            Value::String(_) => true,
-            _ => false,
-        }
-    }
-
-    fn is_truthy(&self) -> bool {
-        match self {
-            Value::Bool(bool) => *bool,
-            Value::Nil => false,
-            _ => true,
-        }
-    }
-
-    fn to_number(&self, loc: Loc) -> Result<f64> {
-        match self {
-            Value::Number(num) => Ok(*num),
-            _ => self.type_expected_error(loc, "number"),
-        }
-    }
-
-    fn to_instance(&self) -> Option<&Rc<Instance>> {
-        match self {
-            Value::Instance(instance) => Some(instance),
-            _ => None,
-        }
-    }
-
-    fn to_class(&self) -> Option<&Rc<Class>> {
-        match self {
-            Value::Class(class) => Some(class),
-            _ => None,
-        }
-    }
-}
 
 pub struct Scope {
     parent: Option<Rc<Scope>>,
@@ -144,6 +75,55 @@ impl Scope {
         } else {
             error(loc, &format!("Assigning to undefined variable '{}'", name));
             Err(Error::UndefinedSymbol)
+        }
+    }
+}
+
+impl Callable {
+    fn bind(&self, instance: Rc<Instance>) -> Self {
+        let Function::Lox(fun) = &self.fun else {
+            panic!("Cannot bind native function.");
+        };
+
+        let instance_closure = Scope::new(fun.closure.clone());
+        instance_closure.define_symbol(Class::THIS.to_owned(), Value::Instance(instance));
+
+        Self {
+            name: self.name.clone(),
+            arity: self.arity,
+            fun: Function::Lox(LoxFun {
+                is_initializer: fun.is_initializer,
+                params: fun.params.clone(),
+                body: fun.body.clone(),
+                closure: instance_closure,
+            }),
+        }
+    }
+}
+
+impl Value {
+    fn is_string(&self) -> bool {
+        match self {
+            Value::String(_) => true,
+            _ => false,
+        }
+    }
+
+    fn is_truthy(&self) -> bool {
+        match self {
+            Value::Bool(bool) => *bool,
+            Value::Nil => false,
+            _ => true,
+        }
+    }
+
+    fn to_number(&self, loc: Loc) -> Result<f64> {
+        match self {
+            Value::Number(num) => Ok(*num),
+            _ => {
+                error(loc, &format!("Expected number but found '{}'", self.error_to_string()));
+                Err(Error::WrongType)
+            },
         }
     }
 }
@@ -219,7 +199,7 @@ impl Interpreter {
             )),
             TokenKind::Plus => {
                 if left.is_string() || right.is_string() {
-                    Ok(Value::String(left.convert_to_string(false) + &right.convert_to_string(false)))
+                    Ok(Value::String(left.convert_to_string() + &right.convert_to_string()))
                 } else {
                     Ok(Value::Number(
                         left.to_number(binary.left.loc)? + right.to_number(binary.right.loc)?,
@@ -281,6 +261,7 @@ impl Interpreter {
 
         self.scope = prev_scope;
         if fun.is_initializer {
+            // Force `init` to always return the current instance.
             Ok(fun.closure.get_symbol(Class::THIS).unwrap())
         } else {
             Ok(result)
@@ -337,7 +318,7 @@ impl Interpreter {
             _ => {
                 error(
                     call.callee.loc,
-                    &format!("Expected function or constructor but found '{}'", value.convert_to_string(true)),
+                    &format!("Expected function or constructor but found '{}'", value.error_to_string()),
                 );
                 Err(Error::WrongType)
             },
@@ -346,16 +327,13 @@ impl Interpreter {
 
     fn eval_get(&mut self, loc: Loc, get: &GetProp) -> Result<Value> {
         let value = self.eval_expr(&get.instance)?;
-        let instance = value.to_instance().ok_or_else(|| {
+        let Value::Instance(instance) = value else {
             error(
                 get.instance.loc,
-                &format!(
-                    "Property access expected instance but found '{}'",
-                    value.convert_to_string(true)
-                ),
+                &format!("Property access expected instance but found '{}'", value.error_to_string()),
             );
-            Error::WrongType
-        })?;
+            return Err(Error::WrongType);
+        };
 
         let fields = instance.fields.borrow();
         if let Some(value) = fields.get(&get.property) {
@@ -370,16 +348,13 @@ impl Interpreter {
 
     fn eval_set(&mut self, set: &SetProp) -> Result<Value> {
         let value = self.eval_expr(&set.instance)?;
-        let instance = value.to_instance().ok_or_else(|| {
+        let Value::Instance(instance) = value else {
             error(
                 set.instance.loc,
-                &format!(
-                    "Property assigning expected instance but found '{}'",
-                    value.convert_to_string(true)
-                ),
+                &format!("Property assignment expected instance but found '{}'", value.error_to_string()),
             );
-            Error::WrongType
-        })?;
+            return Err(Error::WrongType);
+        };
 
         let set_value = self.eval_expr(&set.expr)?;
         instance.fields.borrow_mut().insert(set.property.clone(), set_value.clone());
@@ -407,24 +382,28 @@ impl Interpreter {
             Expr::GetProp(get) => self.eval_get(expr.loc, get),
             Expr::SetProp(set) => self.eval_set(set),
             Expr::Super(Super { var, method }) => {
-                let value = self.get_symbol(var).unwrap();
-                let superclass = value.to_class().unwrap();
+                let Value::Class(superclass) = self.get_symbol(var).unwrap() else {
+                    // Resolver should handle this.
+                    panic!("Super class must be a valid class.");
+                };
 
-                if let Some(method) = superclass.get_method(&method) {
-                    // Scopes are structured such that 'this' is always one scope closer than 'super',
-                    // which makes this hack possible.
-                    let VarScope::Relative(depth) = var.scope.get() else {
-                        panic!("'super' mustn't be in global scope");
-                    };
-
-                    let value = self.get_nth_scope(depth - 1).get_symbol(Class::THIS).unwrap();
-                    let this = value.to_instance().unwrap().clone();
-
-                    Ok(Value::Callable(Rc::new(method.bind(this))))
-                } else {
+                let Some(method) = superclass.get_method(&method) else {
                     error(expr.loc, &format!("Undefined superclass method '{}'", method));
-                    Err(Error::UndefinedSymbol)
-                }
+                    return Err(Error::UndefinedSymbol);
+                };
+
+                // Scopes are structured such that 'this' is always one scope closer than 'super',
+                // which makes this hack possible.
+                let VarScope::Relative(depth) = var.scope.get() else {
+                    panic!("'super' mustn't be in global scope");
+                };
+
+                let value = self.get_nth_scope(depth - 1).get_symbol(Class::THIS).unwrap();
+                let Value::Instance(this) = value else {
+                    panic!("'{}' must be an instance.", Class::THIS)
+                };
+
+                Ok(Value::Callable(Rc::new(method.bind(this))))
             },
         }
     }
@@ -442,12 +421,60 @@ impl Interpreter {
         })
     }
 
+    fn eval_class_decl(&mut self, decl: &ClassDecl) -> Result<()> {
+        let superclass;
+        if let Some(Superclass { loc, var }) = &decl.superclass {
+            let super_value = self.get_symbol(var).ok_or_else(|| {
+                error(*loc, &format!("Undefined class '{}'", var.name));
+                Error::UndefinedSymbol
+            })?;
+
+            let Value::Class(super_class) = &super_value else {
+                error(
+                    *loc,
+                    &format!(
+                        "Expected superclass to be a class but found '{}'",
+                        super_value.error_to_string()
+                    ),
+                );
+                return Err(Error::WrongType);
+            };
+
+            self.scope = Scope::new(self.scope.clone()); // add 'super' scope
+            self.define_symbol(Class::SUPER.to_owned(), super_value.clone());
+
+            superclass = Some(super_class.clone());
+        } else {
+            superclass = None;
+        }
+
+        let mut methods = AHashMap::new();
+        for method in &decl.methods {
+            let value = self.eval_fun_decl(method, true);
+            methods.insert(method.name.clone(), value);
+        }
+
+        let class = Value::Class(Rc::new(Class {
+            name: decl.name.clone(),
+            methods,
+            superclass,
+        }));
+
+        if decl.superclass.is_some() {
+            self.scope = self.scope.parent.clone().unwrap(); // remove 'super' scope
+        }
+
+        self.define_symbol(decl.name.clone(), class);
+
+        Ok(())
+    }
+
     fn eval_stmt(&mut self, stmt: &Stmt) -> Result<()> {
         match stmt {
             Stmt::Expr(expr) => {
                 self.eval_expr(expr)?;
             },
-            Stmt::Print(expr) => println!("{}", self.eval_expr(expr)?.convert_to_string(false)),
+            Stmt::Print(expr) => println!("{}", self.eval_expr(expr)?.convert_to_string()),
             Stmt::Block(stmts) => {
                 let new_scope = Scope::new(self.scope.clone());
                 let prev_scope = mem::replace(&mut self.scope, new_scope);
@@ -488,57 +515,16 @@ impl Interpreter {
                 self.define_symbol(fun.name.clone(), value);
             },
             Stmt::Return(Return { loc: _, expr }) => {
-                let value = if let Some(expr) = expr {
-                    self.eval_expr(expr)?
+                let value;
+                if let Some(expr) = expr {
+                    value = self.eval_expr(expr)?;
                 } else {
-                    Value::Nil
+                    value = Value::Nil;
                 };
+
                 return Err(Error::Return(value));
             },
-            Stmt::ClassDecl(decl) => {
-                let prev_scope = self.scope.clone();
-                let superclass;
-                if let Some(Superclass { loc, var }) = &decl.superclass {
-                    let value = self.get_symbol(var).ok_or_else(|| {
-                        error(*loc, &format!("Undefined class '{}'", var.name));
-                        Error::UndefinedSymbol
-                    })?;
-                    let superclass_ref = value.to_class().ok_or_else(|| {
-                        error(
-                            *loc,
-                            &format!(
-                                "Expected superclass to be a class but found '{}'",
-                                value.convert_to_string(true)
-                            ),
-                        );
-                        Error::WrongType
-                    })?;
-
-                    self.scope = Scope::new(self.scope.clone()); // add 'super' scope
-                    self.define_symbol(Class::SUPER.to_owned(), Value::Class(superclass_ref.clone()));
-
-                    superclass = Some(superclass_ref.clone());
-                } else {
-                    superclass = None;
-                }
-
-                let mut methods = AHashMap::new();
-                for method in &decl.methods {
-                    let value = self.eval_fun_decl(method, true);
-                    methods.insert(method.name.clone(), value);
-                }
-
-                if decl.superclass.is_some() {
-                    self.scope = prev_scope; // remove 'super' scope
-                }
-
-                let class = Value::Class(Rc::new(Class {
-                    decl: decl.clone(),
-                    methods,
-                    superclass,
-                }));
-                self.define_symbol(decl.name.clone(), class);
-            },
+            Stmt::ClassDecl(decl) => self.eval_class_decl(decl)?,
         };
 
         Ok(())

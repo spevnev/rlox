@@ -1,1 +1,1 @@
-while (true) fun foo() {} // [ERROR] Expected expression but found 'fun' at 1:14.
+while (true) fun foo() {} // [ERROR] Expected an expression but found 'fun' at 1:14.

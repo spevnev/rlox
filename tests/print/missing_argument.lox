@@ -1,1 +1,1 @@
-print; // [ERROR] Expected expression but found ';' at 1:6.
+print; // [ERROR] Expected an expression but found ';' at 1:6.

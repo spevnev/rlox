@@ -1,1 +1,1 @@
-fun foo(a, b c, d, e, f) {} // [ERROR] Unclosed '(', expected ')' after the parameters at 1:14.
+fun foo(a, b c, d, e, f) {} // [ERROR] Unclosed '(', expected ')' after the parameters at 1:13.

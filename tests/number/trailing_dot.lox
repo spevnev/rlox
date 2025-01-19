@@ -1,1 +1,1 @@
-123.; // [ERROR] Expected property name after '.' at 1:5.
+123.; // [ERROR] Expected a property name after '.' at 1:5.

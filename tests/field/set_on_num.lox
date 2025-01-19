@@ -1,1 +1,1 @@
-123.foo = "value"; // [ERROR] Property assigning expected instance but found '123' at 1:1.
+123.foo = "value"; // [ERROR] Property assignment expected instance but found '123' at 1:1.

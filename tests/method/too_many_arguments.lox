@@ -256,5 +256,5 @@
      a, /// 253
      a, /// 254
      a, /// 255
-     a); // [ERROR] Max number of arguments is 255 at 258:7.
+     a); // [ERROR] The max number of arguments is 255 at 258:7.
 }

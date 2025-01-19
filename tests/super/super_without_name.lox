@@ -2,6 +2,6 @@ class A {}
 
 class B < A {
   method() {
-    super.; // [ERROR] Expected method name after 'super', 'super' can only be used to access methods at 5:11.
+    super.; // [ERROR] Expected a method name after 'super', 'super' can only be used to access methods at 5:11.
   }
 }

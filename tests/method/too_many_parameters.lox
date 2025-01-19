@@ -255,5 +255,5 @@ class Foo {
     a252,
     a253,
     a254,
-    a255, a) {} // [ERROR] Max number of parameters is 255 at 258:9.
+    a255, a) {} // [ERROR] The max number of parameters is 255 at 258:9.
 }

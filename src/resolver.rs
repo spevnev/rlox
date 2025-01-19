@@ -3,8 +3,8 @@ use ahash::AHashMap;
 use crate::{
     error::{error, Loc},
     parser::{
-        Assign, Binary, Call, Expr, FunDecl, If, LocExpr, Return, Stmt, Super, Superclass, Var, VarDecl, VarScope,
-        While,
+        Assign, Binary, Call, ClassDecl, Expr, FunDecl, If, LocExpr, Return, Stmt, Super, Superclass, Var, VarDecl,
+        VarScope, While,
     },
     value::Class,
 };
@@ -122,7 +122,7 @@ impl Resolver {
             Expr::This(var) => {
                 if self.current_class == ClassType::None {
                     self.had_error = true;
-                    error(expr.loc, "Can't use 'this' outside of class");
+                    error(expr.loc, "Cannot use 'this' outside of class");
                 }
 
                 self.resolve_var(expr.loc, var);
@@ -130,10 +130,10 @@ impl Resolver {
             Expr::Super(Super { var, method: _ }) => {
                 if self.current_class == ClassType::None {
                     self.had_error = true;
-                    error(expr.loc, "Can't use 'super' outside of class");
+                    error(expr.loc, "Cannot use 'super' outside of class");
                 } else if self.current_class == ClassType::Class {
                     self.had_error = true;
-                    error(expr.loc, "Can't use 'super' in a class without superclass");
+                    error(expr.loc, "Cannot use 'super' in a class without superclass");
                 }
 
                 self.resolve_var(expr.loc, var);
@@ -158,6 +158,46 @@ impl Resolver {
         self.current_fun = prev_fun;
 
         self.scopes.pop();
+    }
+
+    fn resolve_class_decl(&mut self, decl: &ClassDecl) {
+        self.define(decl.name_loc, &decl.name);
+
+        let prev_class = self.current_class;
+        if let Some(Superclass { loc, var }) = &decl.superclass {
+            if var.name == decl.name {
+                self.had_error = true;
+                error(*loc, "Class cannot inherit from itself");
+            } else {
+                self.resolve_var(*loc, var);
+            }
+
+            self.scopes.push(AHashMap::new()); // add 'super' scope
+            self.define(Loc::none(), Class::SUPER);
+            self.current_class = ClassType::Subclass;
+        } else {
+            self.current_class = ClassType::Class;
+        }
+
+        self.scopes.push(AHashMap::new()); // add 'this' scope
+        self.define(Loc::none(), Class::THIS);
+
+        for method in &decl.methods {
+            let fun_type = if method.name == Class::INITIALIZER_METHOD {
+                FunType::Initializer
+            } else {
+                FunType::Function
+            };
+            self.resolve_fun(method, fun_type);
+        }
+
+        self.scopes.pop(); // remove 'this' scope
+
+        if decl.superclass.is_some() {
+            self.scopes.pop(); // remove 'super' scope
+        }
+
+        self.current_class = prev_class;
     }
 
     fn resolve_stmt(&mut self, stmt: &Stmt) {
@@ -202,49 +242,12 @@ impl Resolver {
                 if let Some(expr) = expr {
                     if self.current_fun == FunType::Initializer {
                         self.had_error = true;
-                        error(expr.loc, "Can't return value from initializer");
+                        error(expr.loc, "Cannot return value from initializer");
                     }
                     self.resolve_expr(expr);
                 }
             },
-            Stmt::ClassDecl(decl) => {
-                self.define(decl.name_loc, &decl.name);
-
-                let prev_class = self.current_class;
-                if let Some(Superclass { loc, var }) = &decl.superclass {
-                    if var.name == decl.name {
-                        self.had_error = true;
-                        error(*loc, "Class can't inherit from itself");
-                    } else {
-                        self.resolve_var(*loc, var);
-                    }
-
-                    self.scopes.push(AHashMap::new()); // add 'super' scope
-                    self.define(Loc::none(), Class::SUPER);
-                    self.current_class = ClassType::Subclass;
-                } else {
-                    self.current_class = ClassType::Class;
-                }
-
-                self.scopes.push(AHashMap::new()); // add 'this' scope
-                self.define(Loc::none(), Class::THIS);
-
-                for method in &decl.methods {
-                    let fun_type = if method.name == Class::INITIALIZER_METHOD {
-                        FunType::Initializer
-                    } else {
-                        FunType::Function
-                    };
-                    self.resolve_fun(method, fun_type);
-                }
-                self.current_class = prev_class;
-
-                self.scopes.pop(); // remove 'this' scope
-
-                if decl.superclass.is_some() {
-                    self.scopes.pop(); // remove 'super' scope
-                }
-            },
+            Stmt::ClassDecl(decl) => self.resolve_class_decl(decl),
         }
     }
 }

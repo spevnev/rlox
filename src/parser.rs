@@ -6,15 +6,6 @@ use crate::{
     value::{Class, Value},
 };
 
-impl Token {
-    fn to_identifier(&self) -> Option<String> {
-        match &self.value {
-            Value::Identifier(id) => Some(id.clone()),
-            _ => None,
-        }
-    }
-}
-
 pub struct Unary {
     pub op: TokenKind,
     pub expr: Box<LocExpr>,
@@ -294,6 +285,14 @@ impl Parser {
         }
     }
 
+    fn loc(&self) -> Loc {
+        if self.is_done() {
+            self.last_loc
+        } else {
+            self.tokens[self.index].loc
+        }
+    }
+
     /// Returns location immediately after the previous token.
     fn loc_after_prev(&self) -> Loc {
         if self.is_done() {
@@ -365,18 +364,12 @@ impl Parser {
         }
     }
 
-    /// Advances if the next token is of kind `kind` or returns error `error_message`.
-    fn consume(&mut self, kind: TokenKind, error_message: &str) -> Result<Token, ()> {
-        if self.is_done() {
-            error(self.last_loc, error_message);
-            return Err(());
-        }
-
+    /// Advances if the next token is of kind `kind` or returns `None`.
+    fn consume(&mut self, kind: TokenKind) -> Option<Token> {
         if self.is_next(kind) {
-            Ok(self.advance().unwrap())
+            Some(self.advance().unwrap())
         } else {
-            error(self.tokens[self.index].loc, error_message);
-            Err(())
+            None
         }
     }
 
@@ -385,12 +378,12 @@ impl Parser {
         if self.is_next(kind) {
             self.advance().unwrap()
         } else if self.is_done() {
-            panic!("Expected {} but reached the end of input", kind.to_string(),);
+            panic!("Expected {} but reached the end", kind.to_string());
         } else {
             panic!(
                 "Expected {} but found '{}'",
                 kind.to_string(),
-                self.tokens[self.index].value.convert_to_string(true)
+                self.tokens[self.index].value.error_to_string()
             );
         }
     }
@@ -417,7 +410,7 @@ impl Parser {
 
     fn parse_primary(&mut self) -> Result<LocExpr, ()> {
         let Some(token) = self.advance() else {
-            error(self.last_loc, "Expected expression but reached the end");
+            error(self.last_loc, "Expected an expression but reached the end");
             return Err(());
         };
 
@@ -426,28 +419,33 @@ impl Parser {
             TokenKind::False => Ok(LocExpr::new_literal(token.loc, Value::Bool(false))),
             TokenKind::True => Ok(LocExpr::new_literal(token.loc, Value::Bool(true))),
             TokenKind::Nil => Ok(LocExpr::new_literal(token.loc, Value::Nil)),
-            TokenKind::Identifier => Ok(LocExpr::new_var(token.loc, token.to_identifier().unwrap())),
+            TokenKind::Identifier => Ok(LocExpr::new_var(token.loc, token.to_identifier())),
             TokenKind::This => Ok(LocExpr::new_this(token.loc)),
             TokenKind::Super => {
-                self.consume(
-                    TokenKind::Dot,
-                    "Expected '.' after 'super', 'super' can only be used to access methods",
-                )?;
-                let method_token = self.consume(
-                    TokenKind::Identifier,
-                    "Expected method name after 'super', 'super' can only be used to access methods",
-                )?;
-                Ok(LocExpr::new_super(token.loc, method_token.to_identifier().unwrap()))
+                self.consume(TokenKind::Dot).ok_or_else(|| {
+                    error(
+                        self.loc(),
+                        "Expected '.' after 'super', 'super' can only be used to access methods",
+                    )
+                })?;
+                let method_token = self.consume(TokenKind::Identifier).ok_or_else(|| {
+                    error(
+                        self.loc(),
+                        "Expected a method name after 'super', 'super' can only be used to access methods",
+                    )
+                })?;
+                Ok(LocExpr::new_super(token.loc, method_token.to_identifier()))
             },
             TokenKind::LeftParen => {
                 let expr = self.parse_expr()?;
-                self.consume(TokenKind::RightParen, "Unclosed '(', expected ')'")?;
+                self.consume(TokenKind::RightParen)
+                    .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '(', expected ')'"))?;
                 Ok(LocExpr::new_grouping(token.loc, expr))
             },
             _ => {
                 error(
                     token.loc,
-                    &format!("Expected expression but found '{}'", token.kind.to_string()),
+                    &format!("Expected an expression but found '{}'", token.kind.to_string()),
                 );
                 Err(())
             },
@@ -471,9 +469,10 @@ impl Parser {
         }
         if args.len() > Self::MAX_ARGS {
             self.had_error = true;
-            error(error_loc, &format!("Max number of arguments is {}", Self::MAX_ARGS));
+            error(error_loc, &format!("The max number of arguments is {}", Self::MAX_ARGS));
         }
-        self.consume(TokenKind::RightParen, "Unclosed '(', expected ')' after the arguments")?;
+        self.consume(TokenKind::RightParen)
+            .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '(', expected ')' after the arguments"))?;
 
         Ok(args)
     }
@@ -488,8 +487,10 @@ impl Parser {
                     expr = LocExpr::new_call(expr, args);
                 },
                 TokenKind::Dot => {
-                    let property = self.consume(TokenKind::Identifier, "Expected property name after '.'")?;
-                    expr = LocExpr::new_get(property.loc, expr, property.to_identifier().unwrap());
+                    let property = self
+                        .consume(TokenKind::Identifier)
+                        .ok_or_else(|| error(self.loc(), "Expected a property name after '.'"))?;
+                    expr = LocExpr::new_get(property.loc, expr, property.to_identifier());
                 },
                 _ => {
                     self.back();
@@ -619,7 +620,8 @@ impl Parser {
 
     fn parse_expr_stmt(&mut self) -> Result<Stmt, ()> {
         let expr = self.parse_expr()?;
-        self.consume(TokenKind::Semicolon, "Expected semicolon after the expression")?;
+        self.consume(TokenKind::Semicolon)
+            .ok_or_else(|| error(self.loc_after_prev(), "Expected a semicolon after the expression"))?;
 
         Ok(Stmt::Expr(expr))
     }
@@ -627,7 +629,8 @@ impl Parser {
     fn parse_print_stmt(&mut self) -> Result<Stmt, ()> {
         self.expect(TokenKind::Print);
         let expr = self.parse_expr()?;
-        self.consume(TokenKind::Semicolon, "Expected semicolon after the print statement")?;
+        self.consume(TokenKind::Semicolon)
+            .ok_or_else(|| error(self.loc_after_prev(), "Expected a semicolon after the print statement"))?;
 
         Ok(Stmt::Print(expr))
     }
@@ -635,9 +638,11 @@ impl Parser {
     fn parse_if_stmt(&mut self) -> Result<Stmt, ()> {
         self.expect(TokenKind::If);
 
-        self.consume(TokenKind::LeftParen, "Expected '(' after 'if'")?;
+        self.consume(TokenKind::LeftParen)
+            .ok_or_else(|| error(self.loc(), "Expected '(' after 'if'"))?;
         let condition = self.parse_expr()?;
-        self.consume(TokenKind::RightParen, "Unclosed '(', expected ')' after the condition")?;
+        self.consume(TokenKind::RightParen)
+            .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '(', expected ')' after the condition"))?;
 
         let then_branch = Box::new(self.parse_stmt()?);
         let else_branch = if self.try_consume(TokenKind::Else) {
@@ -655,10 +660,12 @@ impl Parser {
 
     fn parse_while_stmt(&mut self) -> Result<Stmt, ()> {
         self.expect(TokenKind::While);
-        self.consume(TokenKind::LeftParen, "Expected '(' after 'while'")?;
+        self.consume(TokenKind::LeftParen)
+            .ok_or_else(|| error(self.loc(), "Expected '(' after 'while'"))?;
 
         let condition = self.parse_expr()?;
-        self.consume(TokenKind::RightParen, "Unclosed '(', expected ')' after the condition")?;
+        self.consume(TokenKind::RightParen)
+            .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '(', expected ')' after the condition"))?;
 
         let body = Box::new(self.parse_stmt()?);
 
@@ -667,7 +674,8 @@ impl Parser {
 
     fn parse_for_stmt(&mut self) -> Result<Stmt, ()> {
         self.expect(TokenKind::For);
-        self.consume(TokenKind::LeftParen, "Expected '(' after 'for'")?;
+        self.consume(TokenKind::LeftParen)
+            .ok_or_else(|| error(self.loc(), "Expected '(' after 'for'"))?;
 
         let initializer;
         if self.try_consume(TokenKind::Semicolon) {
@@ -684,7 +692,8 @@ impl Parser {
             condition = LocExpr::new_literal(Loc::none(), Value::Bool(true));
         } else {
             condition = self.parse_expr()?;
-            self.consume(TokenKind::Semicolon, "Expected ';' after for loop's condition")?;
+            self.consume(TokenKind::Semicolon)
+                .ok_or_else(|| error(self.loc_after_prev(), "Expected a semicolon after 'for' loop condition"))?;
         }
 
         let update;
@@ -692,7 +701,8 @@ impl Parser {
             update = None;
         } else {
             update = Some(Stmt::Expr(self.parse_expr()?));
-            self.consume(TokenKind::RightParen, "Unclosed '(', expected ')'")?;
+            self.consume(TokenKind::RightParen)
+                .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '(', expected ')'"))?;
         }
 
         let body = self.parse_stmt()?;
@@ -723,7 +733,8 @@ impl Parser {
             }))
         } else {
             let expr = self.parse_expr()?;
-            self.consume(TokenKind::Semicolon, "Expected semicolon after the return statement")?;
+            self.consume(TokenKind::Semicolon)
+                .ok_or_else(|| error(self.loc(), "Expected a semicolon after the return statement"))?;
 
             Ok(Stmt::Return(Return {
                 loc: return_token.loc,
@@ -741,7 +752,8 @@ impl Parser {
                 stmts.push(stmt);
             }
         }
-        self.consume(TokenKind::RightBrace, "Unclosed '{', expected '}'")?;
+        self.consume(TokenKind::RightBrace)
+            .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '{', expected '}'"))?;
 
         Ok(stmts)
     }
@@ -760,27 +772,32 @@ impl Parser {
 
     fn parse_var_decl(&mut self) -> Result<Stmt, ()> {
         self.expect(TokenKind::Var);
-        let name_token = self.consume(TokenKind::Identifier, "Expected a variable name after 'var'")?;
+        let name_token = self
+            .consume(TokenKind::Identifier)
+            .ok_or_else(|| error(self.loc(), "Expected a variable name after 'var'"))?;
 
         let mut init = LocExpr::new_literal(Loc::none(), Value::Nil);
         if self.try_consume(TokenKind::Equal) {
             init = self.parse_expr()?;
         }
-        self.consume(TokenKind::Semicolon, "Expected semicolon after the variable declaration")?;
+        self.consume(TokenKind::Semicolon)
+            .ok_or_else(|| error(self.loc_after_prev(), "Expected a semicolon after the variable declaration"))?;
 
         Ok(Stmt::VarDecl(VarDecl {
             name_loc: name_token.loc,
-            name: name_token.to_identifier().unwrap(),
+            name: name_token.to_identifier(),
             init,
         }))
     }
 
     fn parse_param(&mut self) -> Result<FunParam, ()> {
-        let param_token = self.consume(TokenKind::Identifier, "Expected identifier in parameter list")?;
+        let param_token = self
+            .consume(TokenKind::Identifier)
+            .ok_or_else(|| error(self.loc(), "Expected a parameter name in parameter list"))?;
 
         Ok(FunParam {
             loc: param_token.loc,
-            name: param_token.to_identifier().unwrap(),
+            name: param_token.to_identifier(),
         })
     }
 
@@ -801,9 +818,10 @@ impl Parser {
         }
         if params.len() > Self::MAX_ARGS {
             self.had_error = true;
-            error(error_loc, &format!("Max number of parameters is {}", Self::MAX_ARGS));
+            error(error_loc, &format!("The max number of parameters is {}", Self::MAX_ARGS));
         }
-        self.consume(TokenKind::RightParen, "Unclosed '(', expected ')' after the parameters")?;
+        self.consume(TokenKind::RightParen)
+            .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '(', expected ')' after the parameters"))?;
 
         Ok(params)
     }
@@ -814,15 +832,18 @@ impl Parser {
             FunType::Method => "method",
         };
 
-        let name_token = self.consume(
-            TokenKind::Identifier,
-            match fun_type {
-                FunType::Function => "Expected an identifier after 'fun'",
-                FunType::Method => "Expected an identifier for the method name in class body",
-            },
-        )?;
+        let name_token = self.consume(TokenKind::Identifier).ok_or_else(|| {
+            error(
+                self.loc(),
+                match fun_type {
+                    FunType::Function => "Expected a function name after 'fun'",
+                    FunType::Method => "Expected a method name in class body",
+                },
+            )
+        })?;
 
-        self.consume(TokenKind::LeftParen, &format!("Expected '(' after {} name", type_name))?;
+        self.consume(TokenKind::LeftParen)
+            .ok_or_else(|| error(self.loc(), &format!("Expected '(' after {} name", type_name)))?;
         let params = self.parse_params()?;
 
         if !self.is_next(TokenKind::LeftBrace) {
@@ -833,7 +854,7 @@ impl Parser {
 
         Ok(FunDecl {
             name_loc: name_token.loc,
-            name: name_token.to_identifier().unwrap(),
+            name: name_token.to_identifier(),
             params,
             body,
         })
@@ -848,31 +869,37 @@ impl Parser {
 
     fn parse_class_decl(&mut self) -> Result<Stmt, ()> {
         self.expect(TokenKind::Class);
-        let name_token = self.consume(TokenKind::Identifier, "Expected an identifier after 'class'")?;
+        let name_token = self
+            .consume(TokenKind::Identifier)
+            .ok_or_else(|| error(self.loc(), "Expected a class name after 'class'"))?;
 
         let superclass;
         if self.try_consume(TokenKind::Less) {
-            let token = self.consume(TokenKind::Identifier, "Expected a superclass name after '<'")?;
+            let token = self
+                .consume(TokenKind::Identifier)
+                .ok_or_else(|| error(self.loc(), "Expected a superclass name after '<'"))?;
 
             superclass = Some(Superclass {
                 loc: token.loc,
-                var: Var::new(token.to_identifier().unwrap()),
+                var: Var::new(token.to_identifier()),
             });
         } else {
             superclass = None;
         }
 
-        self.consume(TokenKind::LeftBrace, "Expected '{' before class body")?;
+        self.consume(TokenKind::LeftBrace)
+            .ok_or_else(|| error(self.loc(), "Expected '{' before class body"))?;
         let mut methods = Vec::new();
         while !self.is_done() && !self.is_next(TokenKind::RightBrace) {
             methods.push(self.parse_fun(FunType::Method)?);
         }
-        self.consume(TokenKind::RightBrace, "Unclosed '{', expected '}' after class body")?;
+        self.consume(TokenKind::RightBrace)
+            .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '{', expected '}' after class body"))?;
 
         Ok(Stmt::ClassDecl(Rc::new(ClassDecl {
             name_loc: name_token.loc,
             superclass,
-            name: name_token.to_identifier().unwrap(),
+            name: name_token.to_identifier(),
             methods,
         })))
     }
