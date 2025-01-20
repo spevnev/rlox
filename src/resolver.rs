@@ -103,6 +103,11 @@ impl Resolver {
                 self.resolve_expr(left);
                 self.resolve_expr(right);
             },
+            Expr::Ternary(ternary) => {
+                self.resolve_expr(&ternary.condition);
+                self.resolve_expr(&ternary.then_expr);
+                self.resolve_expr(&ternary.else_expr);
+            },
             Expr::Variable(var) => self.resolve_var(expr.loc, var),
             Expr::Assign(Assign { var, expr }) => {
                 self.resolve_expr(expr);

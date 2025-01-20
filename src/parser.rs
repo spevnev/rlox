@@ -17,6 +17,12 @@ pub struct Binary {
     pub right: Box<LocExpr>,
 }
 
+pub struct Ternary {
+    pub condition: Box<LocExpr>,
+    pub then_expr: Box<LocExpr>,
+    pub else_expr: Box<LocExpr>,
+}
+
 /// Specifies in which scope the variable that `Var` references is defined.
 #[derive(Clone, Copy)]
 pub enum VarScope {
@@ -70,6 +76,7 @@ pub enum Expr {
     Grouping(Box<LocExpr>),
     Unary(Unary),
     Binary(Binary),
+    Ternary(Ternary),
     Logical(Binary),
     Variable(Var),
     Assign(Assign),
@@ -117,6 +124,17 @@ impl LocExpr {
                 left: Box::new(left),
                 op: op.kind,
                 right: Box::new(right),
+            }),
+        }
+    }
+
+    fn new_ternary(condition: Self, then_expr: Self, else_expr: Self) -> Self {
+        Self {
+            loc: condition.loc,
+            expr: Expr::Ternary(Ternary {
+                condition: Box::new(condition),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
             }),
         }
     }
@@ -589,28 +607,42 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_assignment(&mut self) -> Result<LocExpr, ()> {
-        let l_expr = self.parse_logic_or()?;
+    fn parse_ternary(&mut self) -> Result<LocExpr, ()> {
+        let mut expr = self.parse_logic_or()?;
 
-        if self.try_consume(TokenKind::Equal) {
-            let r_expr = self.parse_expr()?;
-            match l_expr.expr {
-                Expr::Variable(var) => Ok(LocExpr::new_assign(l_expr.loc, var.name, r_expr)),
-                Expr::GetProp(get) => Ok(LocExpr::new_set(get, r_expr)),
-                _ => {
-                    // Parser is still in a valid state that doesn't require syncing.
-                    // Instead of returning `Err`, that triggers `sync()`, we print the error,
-                    // set `had_error` and return `nil` value since it won't be used anyways.
-                    self.had_error = true;
-                    error(l_expr.loc, "Invalid assignment target");
-                    Ok(LocExpr {
-                        loc: Loc::none(),
-                        expr: Expr::Literal(Value::Nil),
-                    })
-                },
-            }
-        } else {
-            Ok(l_expr)
+        if self.try_consume(TokenKind::Question) {
+            let then_expr = self.parse_expr()?;
+            self.consume(TokenKind::Colon)
+                .ok_or_else(|| error(self.loc(), "Expected a colon after then branch of ternary operator"))?;
+            let else_expr = self.parse_ternary()?;
+            expr = LocExpr::new_ternary(expr, then_expr, else_expr);
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_assignment(&mut self) -> Result<LocExpr, ()> {
+        let l_expr = self.parse_ternary()?;
+
+        if !self.try_consume(TokenKind::Equal) {
+            return Ok(l_expr);
+        }
+
+        let r_expr = self.parse_expr()?;
+        match l_expr.expr {
+            Expr::Variable(var) => Ok(LocExpr::new_assign(l_expr.loc, var.name, r_expr)),
+            Expr::GetProp(get) => Ok(LocExpr::new_set(get, r_expr)),
+            _ => {
+                // Parser is still in a valid state that doesn't require syncing.
+                // Instead of returning `Err`, that triggers `sync()`, we print the error,
+                // set `had_error` and return `nil` value since it won't be used anyways.
+                self.had_error = true;
+                error(l_expr.loc, "Invalid assignment target");
+                Ok(LocExpr {
+                    loc: Loc::none(),
+                    expr: Expr::Literal(Value::Nil),
+                })
+            },
         }
     }
 

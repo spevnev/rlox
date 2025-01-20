@@ -368,6 +368,14 @@ impl Interpreter {
             Expr::Grouping(expr) => self.eval_expr(expr),
             Expr::Unary(unary) => self.eval_unary(unary),
             Expr::Binary(binary) => self.eval_binary(binary),
+            Expr::Ternary(ternary) => {
+                let value = self.eval_expr(&ternary.condition)?;
+                if value.is_truthy() {
+                    self.eval_expr(&ternary.then_expr)
+                } else {
+                    self.eval_expr(&ternary.else_expr)
+                }
+            },
             Expr::Logical(binary) => self.eval_logical(binary),
             Expr::Variable(var) | Expr::This(var) => self.get_symbol(&var).ok_or_else(|| {
                 error(expr.loc, &format!("Undefined symbol '{}'", var.name));

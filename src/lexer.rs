@@ -25,6 +25,8 @@ pub enum TokenKind {
     GreaterEqual,
     Less,
     LessEqual,
+    Question,
+    Colon,
 
     // Literals
     Identifier,
@@ -72,6 +74,8 @@ impl TokenKind {
             TokenKind::GreaterEqual => ">=",
             TokenKind::Less => "<",
             TokenKind::LessEqual => "<=",
+            TokenKind::Question => "?",
+            TokenKind::Colon => ":",
             TokenKind::Identifier => "identifier",
             TokenKind::String => "string",
             TokenKind::Number => "number",
@@ -231,6 +235,8 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
             '+' => TokenKind::Plus,
             ';' => TokenKind::Semicolon,
             '*' => TokenKind::Star,
+            '?' => TokenKind::Question,
+            ':' => TokenKind::Colon,
             '/' => {
                 if lexer.consume('/') {
                     while let Some(c) = lexer.peek() {
