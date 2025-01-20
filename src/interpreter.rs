@@ -20,6 +20,7 @@ pub enum Error {
 
     // The following aren't actual errors, and are used to quickly return from a deeply nested call:
     Return(Value),
+    Break,
 }
 
 /// Debug trait is required in order to panic.
@@ -29,7 +30,8 @@ impl Debug for Error {
             Self::WrongType => write!(f, "WrongType"),
             Self::UndefinedSymbol => write!(f, "UndefinedSymbol"),
             Self::WrongArity => write!(f, "WrongArity"),
-            Self::Return(_) => panic!("Panic on 'Return' must be impossible."),
+            Self::Return(_) => panic!("Panic on 'return' must be impossible."),
+            Self::Break => panic!("Panic on 'break' must be impossible."),
         }
     }
 }
@@ -511,9 +513,14 @@ impl Interpreter {
             },
             Stmt::While(While { condition, body }) => {
                 while self.eval_expr(condition)?.is_truthy() {
-                    self.eval_stmt(body)?;
+                    match self.eval_stmt(body) {
+                        Err(Error::Break) => break,
+                        Ok(_) => {},
+                        Err(err) => return Err(err),
+                    }
                 }
             },
+            Stmt::Break(_) => return Err(Error::Break),
             Stmt::VarDecl(var) => {
                 let value = self.eval_expr(&var.init)?;
                 self.define_symbol(var.name.clone(), value);

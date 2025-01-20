@@ -34,6 +34,7 @@ struct Resolver {
     had_error: bool,
     current_fun: FunType,
     current_class: ClassType,
+    loop_depth: u32,
     scopes: Vec<AHashMap<String, VarState>>,
 }
 
@@ -47,6 +48,7 @@ impl Resolver {
             had_error: false,
             current_fun: FunType::None,
             current_class: ClassType::None,
+            loop_depth: 0,
             scopes: Vec::new(),
         }
     }
@@ -228,7 +230,15 @@ impl Resolver {
             },
             Stmt::While(While { condition, body }) => {
                 self.resolve_expr(condition);
+                self.loop_depth += 1;
                 self.resolve_stmt(body);
+                self.loop_depth -= 1;
+            },
+            Stmt::Break(loc) => {
+                if self.loop_depth == 0 {
+                    self.had_error = true;
+                    error(*loc, "Break outside of loop");
+                }
             },
             Stmt::VarDecl(VarDecl { name_loc, name, init }) => {
                 // Declaring before resolving `init` expr allows to throw an error

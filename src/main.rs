@@ -39,7 +39,6 @@ fn run_repl() -> ExitCode {
         let Ok(stmts) = parse(tokens) else {
             continue;
         };
-        // TODO: Allow to resolve/eval more than 1 line
         let Ok(_) = resolve(&stmts) else {
             continue;
         };

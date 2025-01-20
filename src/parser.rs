@@ -269,6 +269,7 @@ pub enum Stmt {
     Block(Vec<Stmt>),
     If(If),
     While(While),
+    Break(Loc),
     VarDecl(VarDecl),
     FunDecl(FunDecl),
     Return(Return),
@@ -795,6 +796,12 @@ impl Parser {
             TokenKind::Print => self.parse_print_stmt(),
             TokenKind::If => self.parse_if_stmt(),
             TokenKind::While => self.parse_while_stmt(),
+            TokenKind::Break => {
+                let token = self.advance().unwrap();
+                self.consume(TokenKind::Semicolon)
+                    .ok_or_else(|| error(self.loc(), "Expected a semicolon after the break statement"))?;
+                Ok(Stmt::Break(token.loc))
+            },
             TokenKind::For => self.parse_for_stmt(),
             TokenKind::Return => self.parse_return_stmt(),
             TokenKind::LeftBrace => Ok(Stmt::Block(self.parse_block()?)),

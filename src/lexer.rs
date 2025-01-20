@@ -35,6 +35,7 @@ pub enum TokenKind {
 
     // Keywords
     And,
+    Break,
     Class,
     Else,
     False,
@@ -80,6 +81,7 @@ impl TokenKind {
             TokenKind::String => "string",
             TokenKind::Number => "number",
             TokenKind::And => "and",
+            TokenKind::Break => "break",
             TokenKind::Class => "class",
             TokenKind::Else => "else",
             TokenKind::False => "false",
@@ -101,6 +103,7 @@ impl TokenKind {
 
 static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
     "and"    => TokenKind::And,
+    "break"  => TokenKind::Break,
     "class"  => TokenKind::Class,
     "else"   => TokenKind::Else,
     "false"  => TokenKind::False,
