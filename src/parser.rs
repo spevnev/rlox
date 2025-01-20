@@ -71,6 +71,11 @@ pub struct Super {
     pub method: String,
 }
 
+pub struct Lambda {
+    pub params: Vec<FunParam>,
+    pub body: Rc<Vec<Stmt>>,
+}
+
 pub enum Expr {
     Literal(Value),
     Grouping(Box<LocExpr>),
@@ -85,6 +90,7 @@ pub enum Expr {
     SetProp(SetProp),
     This(Var),
     Super(Super),
+    Lambda(Lambda),
 }
 
 pub struct LocExpr {
@@ -212,6 +218,13 @@ impl LocExpr {
                 var: Var::new(Class::SUPER.to_owned()),
                 method,
             }),
+        }
+    }
+
+    fn new_lambda(loc: Loc, params: Vec<FunParam>, body: Rc<Vec<Stmt>>) -> Self {
+        Self {
+            loc,
+            expr: Expr::Lambda(Lambda { params, body }),
         }
     }
 }
@@ -460,6 +473,19 @@ impl Parser {
                 self.consume(TokenKind::RightParen)
                     .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '(', expected ')'"))?;
                 Ok(LocExpr::new_grouping(token.loc, expr))
+            },
+            TokenKind::Fun => {
+                self.consume(TokenKind::LeftParen)
+                    .ok_or_else(|| error(self.loc(), "Expected '(' after 'fun' in anonymous function"))?;
+                let params = self.parse_params()?;
+
+                if !self.is_next(TokenKind::LeftBrace) {
+                    error(self.loc_after_prev(), "Expected '{' before function body");
+                    return Err(());
+                }
+                let body = Rc::new(self.parse_block()?);
+
+                Ok(LocExpr::new_lambda(token.loc, params, body))
             },
             _ => {
                 error(
@@ -946,7 +972,18 @@ impl Parser {
     fn parse_decl(&mut self) -> Option<Stmt> {
         let result = match self.peek().unwrap().kind {
             TokenKind::Var => self.parse_var_decl(),
-            TokenKind::Fun => self.parse_fun_decl(),
+            TokenKind::Fun => {
+                if self
+                    .tokens
+                    .get(self.index + 1)
+                    .is_some_and(|token| token.kind != TokenKind::Identifier)
+                {
+                    // Handle anonymous function as an expr-stmt
+                    self.parse_expr_stmt()
+                } else {
+                    self.parse_fun_decl()
+                }
+            },
             TokenKind::Class => self.parse_class_decl(),
             _ => self.parse_stmt(),
         };

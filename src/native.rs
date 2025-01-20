@@ -23,7 +23,7 @@ pub fn get_native_functions_as_symbols() -> AHashMap<String, Value> {
         (
             name.to_owned(),
             Value::Callable(Rc::new(Callable {
-                name: name.to_owned(),
+                name: Some(name.to_owned()),
                 arity,
                 fun: Function::Native(fun),
             })),

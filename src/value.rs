@@ -22,7 +22,7 @@ pub enum Function {
 }
 
 pub struct Callable {
-    pub name: String,
+    pub name: Option<String>,
     /// number of arguments
     pub arity: usize,
     pub fun: Function,
@@ -76,7 +76,10 @@ impl Value {
             Value::Identifier(identifier) => identifier.clone(),
             Value::Bool(bool) => bool.to_string(),
             Value::Nil => "nil".to_owned(),
-            Value::Callable(callable) => format!("<fn {}>", callable.name),
+            Value::Callable(callable) => match &callable.name {
+                Some(name) => format!("<fn {}>", name),
+                None => "<fn>".to_owned(),
+            },
             Value::Class(class) => class.name.clone(),
             Value::Instance(instance) => format!("{} instance", instance.class.name),
         }

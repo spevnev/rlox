@@ -415,12 +415,22 @@ impl Interpreter {
 
                 Ok(Value::Callable(Rc::new(method.bind(this))))
             },
+            Expr::Lambda(lambda) => Ok(Value::Callable(Rc::new(Callable {
+                name: None,
+                arity: lambda.params.len(),
+                fun: Function::Lox(LoxFun {
+                    is_initializer: false,
+                    params: lambda.params.clone(),
+                    body: lambda.body.clone(),
+                    closure: self.scope.clone(),
+                }),
+            }))),
         }
     }
 
     fn eval_fun_decl(&self, fun: &FunDecl, is_method: bool) -> Rc<Callable> {
         Rc::new(Callable {
-            name: fun.name.clone(),
+            name: Some(fun.name.clone()),
             arity: fun.params.len(),
             fun: Function::Lox(LoxFun {
                 is_initializer: is_method && fun.name == Class::INITIALIZER_METHOD,

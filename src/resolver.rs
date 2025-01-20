@@ -145,6 +145,22 @@ impl Resolver {
 
                 self.resolve_var(expr.loc, var);
             },
+            Expr::Lambda(lambda) => {
+                self.scopes.push(AHashMap::new());
+
+                for param in &lambda.params {
+                    self.define(param.loc, &param.name);
+                }
+
+                let prev_fun = self.current_fun;
+                self.current_fun = FunType::Function;
+                for stmt in lambda.body.as_ref() {
+                    self.resolve_stmt(stmt);
+                }
+                self.current_fun = prev_fun;
+
+                self.scopes.pop();
+            },
         }
     }
 
