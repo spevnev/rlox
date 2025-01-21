@@ -1,3 +1,5 @@
+use crate::ONLY_ERRORS;
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Loc {
     pub line: usize,
@@ -7,6 +9,12 @@ pub struct Loc {
 impl Loc {
     pub fn none() -> Self {
         Self { line: 0, column: 0 }
+    }
+}
+
+pub fn warning(loc: Loc, message: &str) {
+    if !ONLY_ERRORS.get() {
+        eprintln!("[WARNING] {} at {}:{}.", message, loc.line, loc.column);
     }
 }
 

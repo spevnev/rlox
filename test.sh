@@ -14,7 +14,7 @@ passed=0
 failed=0
 for file in $(find tests -type f); do
     expected=$(grep '// ' $file | grep -v '///' | sed -re 's/.*\/\/ (.+)/\1/')
-    output=$($BIN $file 2>&1)
+    output=$($BIN --only-errors $file 2>&1)
     name=$(echo $file | cut -d/ -f2-)
 
     if [ "$output" = "$expected" ]; then

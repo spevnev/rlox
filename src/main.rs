@@ -1,6 +1,8 @@
 use std::{
+    cell::Cell,
+    collections::VecDeque,
     env, fs,
-    io::{stdin, stdout, Write},
+    io::{stderr, stdin, stdout, Write},
     process::ExitCode,
 };
 
@@ -16,6 +18,12 @@ mod native;
 mod parser;
 mod resolver;
 mod value;
+
+const ONLY_ERRORS_FLAG: &'static str = "--only-errors";
+
+thread_local! {
+    pub static ONLY_ERRORS: Cell<bool> = Cell::new(false);
+}
 
 fn run_repl() -> ExitCode {
     let mut interpreter = Interpreter::new();
@@ -73,23 +81,52 @@ fn run_file(path: &str) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn usage(program: &str) -> ExitCode {
-    eprintln!("usage:");
-    eprintln!("{program}        - REPL");
-    eprintln!("{program} [path] - interpret file");
+/// Print the usage. If `is_help` is true, prints to stdout and exits successfully,
+/// otherwise prints to stderr and exits with failure.
+fn usage(program: &str, is_help: bool) -> ExitCode {
+    let usage = format!(
+        "
+Usage:
+  {program}        - REPL
+  {program} [path] - Interpret file
 
-    ExitCode::FAILURE
+Options:
+  -h, --help    - show this message
+  {ONLY_ERRORS_FLAG} - only print errors (ignore warnings)
+"
+    );
+
+    if is_help {
+        stdout().write(usage.as_bytes()).unwrap();
+        ExitCode::SUCCESS
+    } else {
+        stderr().write(usage.as_bytes()).unwrap();
+        ExitCode::FAILURE
+    }
 }
 
 fn main() -> ExitCode {
-    let args: Vec<String> = env::args().collect();
+    let mut args: VecDeque<String> = env::args().collect();
 
-    match args.len() {
-        1 => run_repl(),
-        2 => run_file(&args[1]),
-        _ => {
-            let program = args[0].split('/').last().unwrap();
-            usage(program)
-        },
+    let program_path = args.pop_front().unwrap();
+    let program_name = program_path.split('/').last().unwrap();
+
+    let mut opt_path = None;
+    while let Some(arg) = args.pop_front() {
+        if arg == "-h" || arg == "--help" {
+            return usage(program_name, true);
+        } else if arg == ONLY_ERRORS_FLAG {
+            ONLY_ERRORS.set(true);
+        } else if opt_path.is_some() {
+            return usage(program_name, false);
+        } else {
+            opt_path = Some(arg);
+        }
+    }
+
+    if let Some(path) = opt_path {
+        run_file(&path)
+    } else {
+        run_repl()
     }
 }
