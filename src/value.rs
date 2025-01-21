@@ -31,6 +31,8 @@ pub struct Callable {
 pub struct Class {
     pub name: String,
     pub methods: AHashMap<String, Rc<Callable>>,
+    /// Instance of metaclass that contains static methods.
+    pub static_instance: Option<Rc<Instance>>,
     pub superclass: Option<Rc<Class>>,
 }
 

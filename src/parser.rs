@@ -273,6 +273,7 @@ pub struct ClassDecl {
     pub name_loc: Loc,
     pub name: String,
     pub methods: Vec<FunDecl>,
+    pub static_methods: Vec<FunDecl>,
     pub superclass: Option<Superclass>,
 }
 
@@ -955,8 +956,16 @@ impl Parser {
         self.consume(TokenKind::LeftBrace)
             .ok_or_else(|| error(self.loc(), "Expected '{' before class body"))?;
         let mut methods = Vec::new();
+        let mut static_methods = Vec::new();
         while !self.is_done() && !self.is_next(TokenKind::RightBrace) {
-            methods.push(self.parse_fun(FunType::Method)?);
+            let is_static = self.try_consume(TokenKind::Class);
+            let method = self.parse_fun(FunType::Method)?;
+
+            if is_static {
+                static_methods.push(method);
+            } else {
+                methods.push(method);
+            }
         }
         self.consume(TokenKind::RightBrace)
             .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '{', expected '}' after class body"))?;
@@ -966,6 +975,7 @@ impl Parser {
             superclass,
             name: name_token.to_identifier(),
             methods,
+            static_methods,
         })))
     }
 

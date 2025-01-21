@@ -327,15 +327,39 @@ impl Interpreter {
         }
     }
 
+    fn get_instance(loc: Loc, value: Value) -> Result<Rc<Instance>> {
+        match value {
+            Value::Instance(instance) => Ok(instance),
+            Value::Class(class) => {
+                if let Some(instance) = &class.static_instance {
+                    Ok(instance.clone())
+                } else {
+                    error(
+                        loc,
+                        &format!(
+                            "Properties/methods on class are only allowed for static methods, but '{}' doesn't have any",
+                            class.name
+                        ),
+                    );
+                    Err(Error::WrongType)
+                }
+            },
+            _ => {
+                error(
+                    loc,
+                    &format!(
+                        "Properties/methods only exist on instances but found '{}'",
+                        value.error_to_string()
+                    ),
+                );
+                Err(Error::WrongType)
+            },
+        }
+    }
+
     fn eval_get(&mut self, loc: Loc, get: &GetProp) -> Result<Value> {
         let value = self.eval_expr(&get.instance)?;
-        let Value::Instance(instance) = value else {
-            error(
-                get.instance.loc,
-                &format!("Property access expected instance but found '{}'", value.error_to_string()),
-            );
-            return Err(Error::WrongType);
-        };
+        let instance = Self::get_instance(get.instance.loc, value)?;
 
         let fields = instance.fields.borrow();
         if let Some(value) = fields.get(&get.property) {
@@ -343,20 +367,14 @@ impl Interpreter {
         } else if let Some(method) = instance.class.get_method(&get.property) {
             Ok(Value::Callable(Rc::new(method.bind(instance.clone()))))
         } else {
-            error(loc, &format!("Undefined property '{}'", &get.property));
+            error(loc, &format!("Undefined property/method '{}'", &get.property));
             Err(Error::UndefinedSymbol)
         }
     }
 
     fn eval_set(&mut self, set: &SetProp) -> Result<Value> {
         let value = self.eval_expr(&set.instance)?;
-        let Value::Instance(instance) = value else {
-            error(
-                set.instance.loc,
-                &format!("Property assignment expected instance but found '{}'", value.error_to_string()),
-            );
-            return Err(Error::WrongType);
-        };
+        let instance = Self::get_instance(set.instance.loc, value)?;
 
         let set_value = self.eval_expr(&set.expr)?;
         instance.fields.borrow_mut().insert(set.property.clone(), set_value.clone());
@@ -392,7 +410,7 @@ impl Interpreter {
             Expr::GetProp(get) => self.eval_get(expr.loc, get),
             Expr::SetProp(set) => self.eval_set(set),
             Expr::Super(Super { var, method }) => {
-                let Value::Class(superclass) = self.get_symbol(var).unwrap() else {
+                let Some(Value::Class(superclass)) = self.get_symbol(var) else {
                     // Resolver should handle this.
                     panic!("Super class must be a valid class.");
                 };
@@ -474,15 +492,41 @@ impl Interpreter {
             methods.insert(method.name.clone(), value);
         }
 
-        let class = Value::Class(Rc::new(Class {
-            name: decl.name.clone(),
-            methods,
-            superclass,
-        }));
-
         if decl.superclass.is_some() {
             self.scope = self.scope.parent.clone().unwrap(); // remove 'super' scope
         }
+
+        let static_instance;
+        if decl.static_methods.is_empty() {
+            static_instance = None;
+        } else {
+            // Create an instance of metaclass which contains static methods of the current class.
+
+            let mut static_methods = AHashMap::new();
+            for method in &decl.static_methods {
+                let value = self.eval_fun_decl(method, false);
+                static_methods.insert(method.name.clone(), value);
+            }
+
+            let metaclass = Rc::new(Class {
+                name: decl.name.clone() + " metaclass",
+                methods: static_methods,
+                static_instance: None,
+                superclass: None,
+            });
+
+            static_instance = Some(Rc::new(Instance {
+                class: metaclass,
+                fields: RefCell::new(AHashMap::new()),
+            }));
+        }
+
+        let class = Value::Class(Rc::new(Class {
+            name: decl.name.clone(),
+            methods,
+            static_instance,
+            superclass,
+        }));
 
         self.define_symbol(decl.name.clone(), class);
 

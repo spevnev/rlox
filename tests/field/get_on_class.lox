@@ -1,2 +1,2 @@
 class Foo {}
-Foo.bar; // [ERROR] Property access expected instance but found 'Foo' at 2:1.
+Foo.bar; // [ERROR] Properties/methods on class are only allowed for static methods, but 'Foo' doesn't have any at 2:1.
