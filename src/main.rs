@@ -1,9 +1,9 @@
 use std::{
-    cell::Cell,
     collections::VecDeque,
     env, fs,
     io::{stderr, stdin, stdout, Write},
     process::ExitCode,
+    sync::OnceLock,
 };
 
 use interpreter::Interpreter;
@@ -19,11 +19,17 @@ mod parser;
 mod resolver;
 mod value;
 
-const ONLY_ERRORS_FLAG: &'static str = "--only-errors";
-
-thread_local! {
-    pub static ONLY_ERRORS: Cell<bool> = Cell::new(false);
+pub struct Options {
+    pub only_errors: bool,
 }
+
+impl Options {
+    fn new() -> Self {
+        Self { only_errors: false }
+    }
+}
+
+pub static OPTIONS: OnceLock<Options> = OnceLock::new();
 
 fn run_repl() -> ExitCode {
     let mut interpreter = Interpreter::new();
@@ -86,13 +92,15 @@ fn run_file(path: &str) -> ExitCode {
 fn usage(program: &str, is_help: bool) -> ExitCode {
     let usage = format!(
         "
+Interpreter for Lox programming language.
+
 Usage:
   {program}        - REPL
-  {program} [path] - Interpret file
+  {program} <path> - interpret file
 
 Options:
   -h, --help    - show this message
-  {ONLY_ERRORS_FLAG} - only print errors (ignore warnings)
+  --only-errors - only print errors (ignore warnings)
 "
     );
 
@@ -111,22 +119,28 @@ fn main() -> ExitCode {
     let program_path = args.pop_front().unwrap();
     let program_name = program_path.split('/').last().unwrap();
 
-    let mut opt_path = None;
+    let mut command_args = Vec::new();
+    let mut options = Options::new();
+
+    // IMPORTANT: Keep options/commands in sync with `usage`.
+    // Parse flags to set options, and save command args.
     while let Some(arg) = args.pop_front() {
         if arg == "-h" || arg == "--help" {
             return usage(program_name, true);
-        } else if arg == ONLY_ERRORS_FLAG {
-            ONLY_ERRORS.set(true);
-        } else if opt_path.is_some() {
-            return usage(program_name, false);
+        } else if arg == "--only-errors" {
+            options.only_errors = true;
         } else {
-            opt_path = Some(arg);
+            command_args.push(arg);
         }
     }
 
-    if let Some(path) = opt_path {
-        run_file(&path)
-    } else {
-        run_repl()
+    let Ok(()) = OPTIONS.set(options) else {
+        panic!("Unable to set options.");
+    };
+
+    match command_args.len() {
+        0 => run_repl(),
+        1 => run_file(&command_args[0]),
+        _ => usage(program_name, false),
     }
 }

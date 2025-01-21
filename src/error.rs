@@ -1,4 +1,4 @@
-use crate::ONLY_ERRORS;
+use crate::OPTIONS;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Loc {
@@ -13,7 +13,7 @@ impl Loc {
 }
 
 pub fn warning(loc: Loc, message: &str) {
-    if !ONLY_ERRORS.get() {
+    if !OPTIONS.get().unwrap().only_errors {
         eprintln!("[WARNING] {} at {}:{}.", message, loc.line, loc.column);
     }
 }
