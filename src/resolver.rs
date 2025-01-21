@@ -113,7 +113,9 @@ impl Resolver {
 
         for (name, state) in prev_scope {
             if let VarState::Defined(loc) = state {
-                warning(loc, &format!("Unread local variable '{}'", name));
+                if name != Class::THIS && name != Class::SUPER {
+                    warning(loc, &format!("Unread local variable '{}'", name));
+                }
             }
         }
     }
