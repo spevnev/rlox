@@ -1,7 +1,7 @@
 use ahash::AHashMap;
 
 use crate::{
-    error::{error, Loc},
+    error::{error, warning, Loc},
     parser::{
         Assign, Binary, Call, ClassDecl, Expr, FunDecl, If, LocExpr, Return, Stmt, Super, Superclass, Var, VarDecl,
         VarScope, While,
@@ -13,7 +13,8 @@ use crate::{
 enum VarState {
     /// Declared means that the name is taken, but usage is still invalid.
     Declared,
-    Defined,
+    Defined(Loc),
+    Read,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -69,30 +70,51 @@ impl Resolver {
             return;
         };
 
-        if scope
-            .insert(name.to_owned(), VarState::Defined)
-            // Define is valid only if it is `None` or `Declared`.
-            .is_some_and(|state| state == VarState::Defined)
-        {
+        let Some(prev_state) = scope.insert(name.to_owned(), VarState::Defined(loc)) else {
+            return;
+        };
+
+        // Define is only valid when the previous state is `None` or `Declared`.
+        if prev_state != VarState::Declared {
             self.had_error = true;
             error(loc, &format!("Redefinition of symbol '{}'", name));
         }
     }
 
-    fn resolve_var(&mut self, loc: Loc, var: &Var) {
+    fn resolve_var(&mut self, loc: Loc, var: &Var, is_read: bool) {
         let mut depth = 0;
-        for scope in self.scopes.iter().rev() {
+        for scope in self.scopes.iter_mut().rev() {
             if let Some(state) = scope.get(&var.name) {
                 match state {
                     VarState::Declared => {
                         self.had_error = true;
                         error(loc, &format!("Can't read variable '{}' in its own initializer", var.name));
                     },
-                    VarState::Defined => var.scope.set(VarScope::Relative(depth)),
+                    VarState::Defined(_) => {
+                        if is_read {
+                            scope.insert(var.name.clone(), VarState::Read);
+                        }
+                        var.scope.set(VarScope::Relative(depth))
+                    },
+                    VarState::Read => var.scope.set(VarScope::Relative(depth)),
                 }
                 return;
             }
             depth += 1;
+        }
+    }
+
+    fn begin_scope(&mut self) {
+        self.scopes.push(AHashMap::new());
+    }
+
+    fn end_scope(&mut self) {
+        let prev_scope = self.scopes.pop().unwrap();
+
+        for (name, state) in prev_scope {
+            if let VarState::Defined(loc) = state {
+                warning(loc, &format!("Unread local variable '{}'", name));
+            }
         }
     }
 
@@ -110,10 +132,10 @@ impl Resolver {
                 self.resolve_expr(&ternary.then_expr);
                 self.resolve_expr(&ternary.else_expr);
             },
-            Expr::Variable(var) => self.resolve_var(expr.loc, var),
+            Expr::Variable(var) => self.resolve_var(expr.loc, var, true),
             Expr::Assign(Assign { var, expr }) => {
                 self.resolve_expr(expr);
-                self.resolve_var(expr.loc, var);
+                self.resolve_var(expr.loc, var, false);
             },
             Expr::Call(Call { callee, args }) => {
                 self.resolve_expr(callee);
@@ -132,7 +154,7 @@ impl Resolver {
                     error(expr.loc, "Cannot use 'this' outside of class");
                 }
 
-                self.resolve_var(expr.loc, var);
+                self.resolve_var(expr.loc, var, true);
             },
             Expr::Super(Super { var, method: _ }) => {
                 if self.current_class == ClassType::None {
@@ -143,10 +165,10 @@ impl Resolver {
                     error(expr.loc, "Cannot use 'super' in a class without superclass");
                 }
 
-                self.resolve_var(expr.loc, var);
+                self.resolve_var(expr.loc, var, true);
             },
             Expr::Lambda(lambda) => {
-                self.scopes.push(AHashMap::new());
+                self.begin_scope();
 
                 for param in &lambda.params {
                     self.define(param.loc, &param.name);
@@ -159,7 +181,7 @@ impl Resolver {
                 }
                 self.current_fun = prev_fun;
 
-                self.scopes.pop();
+                self.end_scope();
             },
         }
     }
@@ -167,7 +189,7 @@ impl Resolver {
     fn resolve_fun(&mut self, fun: &FunDecl, fun_type: FunType) {
         self.define(fun.name_loc, &fun.name);
 
-        self.scopes.push(AHashMap::new());
+        self.begin_scope();
 
         for param in &fun.params {
             self.define(param.loc, &param.name);
@@ -180,7 +202,7 @@ impl Resolver {
         }
         self.current_fun = prev_fun;
 
-        self.scopes.pop();
+        self.end_scope();
     }
 
     fn resolve_class_decl(&mut self, decl: &ClassDecl) {
@@ -192,17 +214,17 @@ impl Resolver {
                 self.had_error = true;
                 error(*loc, "Class cannot inherit from itself");
             } else {
-                self.resolve_var(*loc, var);
+                self.resolve_var(*loc, var, true);
             }
 
-            self.scopes.push(AHashMap::new()); // add 'super' scope
+            self.begin_scope(); // 'super' scope
             self.define(Loc::none(), Class::SUPER);
             self.current_class = ClassType::Subclass;
         } else {
             self.current_class = ClassType::Class;
         }
 
-        self.scopes.push(AHashMap::new()); // add 'this' scope
+        self.begin_scope(); // 'this' scope
         self.define(Loc::none(), Class::THIS);
 
         for method in &decl.methods {
@@ -214,10 +236,10 @@ impl Resolver {
             self.resolve_fun(method, fun_type);
         }
 
-        self.scopes.pop(); // remove 'this' scope
+        self.end_scope(); // 'this' scope
 
         if decl.superclass.is_some() {
-            self.scopes.pop(); // remove 'super' scope
+            self.end_scope(); // 'super' scope
         }
 
         self.current_class = prev_class;
@@ -227,11 +249,11 @@ impl Resolver {
         match stmt {
             Stmt::Expr(expr) | Stmt::Print(expr) => self.resolve_expr(expr),
             Stmt::Block(stmts) => {
-                self.scopes.push(AHashMap::new());
+                self.begin_scope();
                 for stmt in stmts {
                     self.resolve_stmt(stmt);
                 }
-                self.scopes.pop();
+                self.end_scope();
             },
             Stmt::If(If {
                 condition,
