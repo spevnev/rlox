@@ -257,6 +257,7 @@ pub struct FunDecl {
     pub name: String,
     pub params: Vec<FunParam>,
     pub body: Rc<Vec<Stmt>>,
+    pub is_getter: bool,
 }
 
 pub struct Return {
@@ -288,12 +289,6 @@ pub enum Stmt {
     FunDecl(FunDecl),
     Return(Return),
     ClassDecl(Rc<ClassDecl>),
-}
-
-#[derive(PartialEq, Clone, Copy)]
-enum FunType {
-    Function,
-    Method,
 }
 
 struct Parser {
@@ -892,45 +887,30 @@ impl Parser {
         Ok(params)
     }
 
-    fn parse_fun(&mut self, fun_type: FunType) -> Result<FunDecl, ()> {
-        let type_name = match fun_type {
-            FunType::Function => "function",
-            FunType::Method => "method",
-        };
+    fn parse_fun_decl(&mut self) -> Result<Stmt, ()> {
+        self.expect(TokenKind::Fun);
 
-        let name_token = self.consume(TokenKind::Identifier).ok_or_else(|| {
-            error(
-                self.loc(),
-                match fun_type {
-                    FunType::Function => "Expected a function name after 'fun'",
-                    FunType::Method => "Expected a method name in class body",
-                },
-            )
-        })?;
+        let name_token = self
+            .consume(TokenKind::Identifier)
+            .ok_or_else(|| error(self.loc(), "Expected a function name after 'fun'"))?;
 
         self.consume(TokenKind::LeftParen)
-            .ok_or_else(|| error(self.loc(), &format!("Expected '(' after {} name", type_name)))?;
+            .ok_or_else(|| error(self.loc(), "Expected '(' after function name"))?;
         let params = self.parse_params()?;
 
         if !self.is_next(TokenKind::LeftBrace) {
-            error(self.loc_after_prev(), &format!("Expected '{{' before {} body", type_name));
+            error(self.loc_after_prev(), "Expected '{' before function body");
             return Err(());
         }
         let body = Rc::new(self.parse_block()?);
 
-        Ok(FunDecl {
+        Ok(Stmt::FunDecl(FunDecl {
             name_loc: name_token.loc,
             name: name_token.to_identifier(),
             params,
             body,
-        })
-    }
-
-    fn parse_fun_decl(&mut self) -> Result<Stmt, ()> {
-        self.expect(TokenKind::Fun);
-        let fun = self.parse_fun(FunType::Function)?;
-
-        Ok(Stmt::FunDecl(fun))
+            is_getter: false,
+        }))
     }
 
     fn parse_class_decl(&mut self) -> Result<Stmt, ()> {
@@ -939,44 +919,70 @@ impl Parser {
             .consume(TokenKind::Identifier)
             .ok_or_else(|| error(self.loc(), "Expected a class name after 'class'"))?;
 
-        let superclass;
+        let mut decl = ClassDecl {
+            name_loc: name_token.loc,
+            name: name_token.to_identifier(),
+            superclass: None,
+            methods: Vec::new(),
+            static_methods: Vec::new(),
+        };
+
         if self.try_consume(TokenKind::Less) {
             let token = self
                 .consume(TokenKind::Identifier)
                 .ok_or_else(|| error(self.loc(), "Expected a superclass name after '<'"))?;
 
-            superclass = Some(Superclass {
+            decl.superclass = Some(Superclass {
                 loc: token.loc,
                 var: Var::new(token.to_identifier()),
             });
-        } else {
-            superclass = None;
         }
 
         self.consume(TokenKind::LeftBrace)
             .ok_or_else(|| error(self.loc(), "Expected '{' before class body"))?;
-        let mut methods = Vec::new();
-        let mut static_methods = Vec::new();
+
         while !self.is_done() && !self.is_next(TokenKind::RightBrace) {
             let is_static = self.try_consume(TokenKind::Class);
-            let method = self.parse_fun(FunType::Method)?;
+
+            let name_token = self
+                .consume(TokenKind::Identifier)
+                .ok_or_else(|| error(self.loc(), "Expected a method name in class body"))?;
+
+            let params;
+            let is_getter;
+            if self.try_consume(TokenKind::LeftParen) {
+                params = self.parse_params()?;
+                is_getter = false;
+            } else {
+                params = Vec::new();
+                is_getter = true;
+            }
+
+            if !self.is_next(TokenKind::LeftBrace) {
+                error(self.loc_after_prev(), "Expected '{' before method body");
+                return Err(());
+            }
+            let body = Rc::new(self.parse_block()?);
+
+            let method = FunDecl {
+                name_loc: name_token.loc,
+                name: name_token.to_identifier(),
+                params,
+                body,
+                is_getter,
+            };
 
             if is_static {
-                static_methods.push(method);
+                decl.static_methods.push(method);
             } else {
-                methods.push(method);
+                decl.methods.push(method);
             }
         }
+
         self.consume(TokenKind::RightBrace)
             .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '{', expected '}' after class body"))?;
 
-        Ok(Stmt::ClassDecl(Rc::new(ClassDecl {
-            name_loc: name_token.loc,
-            superclass,
-            name: name_token.to_identifier(),
-            methods,
-            static_methods,
-        })))
+        Ok(Stmt::ClassDecl(Rc::new(decl)))
     }
 
     fn parse_decl(&mut self) -> Option<Stmt> {

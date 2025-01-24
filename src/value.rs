@@ -11,6 +11,7 @@ pub type NativeFun = fn(args: Vec<Value>) -> Value;
 
 pub struct LoxFun {
     pub is_initializer: bool,
+    pub is_getter: bool,
     pub params: Vec<FunParam>,
     pub body: Rc<Vec<Stmt>>,
     pub closure: Rc<Scope>,

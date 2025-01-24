@@ -81,24 +81,30 @@ impl Scope {
     }
 }
 
-impl Callable {
+impl LoxFun {
     fn bind(&self, instance: Rc<Instance>) -> Self {
-        let Function::Lox(fun) = &self.fun else {
-            panic!("Cannot bind native function.");
-        };
-
-        let instance_closure = Scope::new(fun.closure.clone());
+        let instance_closure = Scope::new(self.closure.clone());
         instance_closure.define_symbol(Class::THIS.to_owned(), Value::Instance(instance));
 
         Self {
-            name: self.name.clone(),
-            arity: self.arity,
-            fun: Function::Lox(LoxFun {
-                is_initializer: fun.is_initializer,
-                params: fun.params.clone(),
-                body: fun.body.clone(),
-                closure: instance_closure,
-            }),
+            is_initializer: self.is_initializer,
+            is_getter: self.is_getter,
+            params: self.params.clone(),
+            body: self.body.clone(),
+            closure: instance_closure,
+        }
+    }
+}
+
+impl Callable {
+    fn bind(&self, instance: Rc<Instance>) -> Self {
+        match &self.fun {
+            Function::Native(_) => panic!("Cannot bind native function."),
+            Function::Lox(fun) => Self {
+                name: self.name.clone(),
+                arity: self.arity,
+                fun: Function::Lox(fun.bind(instance)),
+            },
         }
     }
 }
@@ -365,7 +371,16 @@ impl Interpreter {
         if let Some(value) = fields.get(&get.property) {
             Ok(value.clone())
         } else if let Some(method) = instance.class.get_method(&get.property) {
-            Ok(Value::Callable(Rc::new(method.bind(instance.clone()))))
+            match &method.fun {
+                Function::Native(_) => panic!("Method cannot be a native function."),
+                Function::Lox(fun) => {
+                    if fun.is_getter {
+                        self.eval_lox_fun(&fun.bind(instance.clone()), Vec::new())
+                    } else {
+                        Ok(Value::Callable(Rc::new(method.bind(instance.clone()))))
+                    }
+                },
+            }
         } else {
             error(loc, &format!("Undefined property/method '{}'", &get.property));
             Err(Error::UndefinedSymbol)
@@ -438,6 +453,7 @@ impl Interpreter {
                 arity: lambda.params.len(),
                 fun: Function::Lox(LoxFun {
                     is_initializer: false,
+                    is_getter: false,
                     params: lambda.params.clone(),
                     body: lambda.body.clone(),
                     closure: self.scope.clone(),
@@ -446,12 +462,13 @@ impl Interpreter {
         }
     }
 
-    fn eval_fun_decl(&self, fun: &FunDecl, is_method: bool) -> Rc<Callable> {
+    fn eval_fun_decl(&self, fun: &FunDecl, is_initializer: bool) -> Rc<Callable> {
         Rc::new(Callable {
             name: Some(fun.name.clone()),
             arity: fun.params.len(),
             fun: Function::Lox(LoxFun {
-                is_initializer: is_method && fun.name == Class::INITIALIZER_METHOD,
+                is_initializer,
+                is_getter: fun.is_getter,
                 params: fun.params.clone(),
                 body: fun.body.clone(),
                 closure: self.scope.clone(),
@@ -488,7 +505,7 @@ impl Interpreter {
 
         let mut methods = AHashMap::new();
         for method in &decl.methods {
-            let value = self.eval_fun_decl(method, true);
+            let value = self.eval_fun_decl(method, method.name == Class::INITIALIZER_METHOD);
             methods.insert(method.name.clone(), value);
         }
 
