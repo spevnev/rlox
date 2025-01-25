@@ -18,6 +18,20 @@ pub fn warning(loc: Loc, message: &str) {
     }
 }
 
+#[macro_export]
+macro_rules! warning {
+    ( $loc:expr, $($arg:tt)* ) => {{
+        warning($loc, &format!($($arg)*));
+    }};
+}
+
 pub fn error(loc: Loc, message: &str) {
     eprintln!("[ERROR] {} at {}:{}.", message, loc.line, loc.column);
+}
+
+#[macro_export]
+macro_rules! error {
+    ( $loc:expr, $($arg:tt)* ) => {{
+        error($loc, &format!($($arg)*));
+    }};
 }

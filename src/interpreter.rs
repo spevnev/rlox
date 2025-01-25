@@ -75,7 +75,7 @@ impl Scope {
             *var = value;
             Ok(())
         } else {
-            error(loc, &format!("Assigning to undefined variable '{}'", name));
+            error!(loc, "Assigning to undefined variable '{name}'");
             Err(Error::UndefinedSymbol)
         }
     }
@@ -84,7 +84,7 @@ impl Scope {
 impl LoxFun {
     fn bind(&self, instance: Rc<Instance>) -> Self {
         let instance_closure = Scope::new(self.closure.clone());
-        instance_closure.define_symbol(Class::THIS.to_owned(), Value::Instance(instance));
+        instance_closure.define_symbol("this".to_owned(), Value::Instance(instance));
 
         Self {
             is_initializer: self.is_initializer,
@@ -129,7 +129,33 @@ impl Value {
         match self {
             Value::Number(num) => Ok(*num),
             _ => {
-                error(loc, &format!("Expected number but found '{}'", self.error_to_string()));
+                error!(loc, "Expected number but found '{}'", self.error_to_string());
+                Err(Error::WrongType)
+            },
+        }
+    }
+
+    fn get_instance(self, loc: Loc) -> Result<Rc<Instance>> {
+        match self {
+            Value::Instance(instance) => Ok(instance),
+            Value::Class(class) => {
+                if let Some(instance) = &class.static_instance {
+                    Ok(instance.clone())
+                } else {
+                    error!(
+                        loc,
+                        "Properties/methods on class are only allowed for static methods, but '{}' doesn't have any",
+                        class.name
+                    );
+                    Err(Error::WrongType)
+                }
+            },
+            _ => {
+                error!(
+                    loc,
+                    "Properties/methods only exist on instances but found '{}'",
+                    self.error_to_string()
+                );
                 Err(Error::WrongType)
             },
         }
@@ -270,7 +296,7 @@ impl Interpreter {
         self.scope = prev_scope;
         if fun.is_initializer {
             // Force `init` to always return the current instance.
-            Ok(fun.closure.get_symbol(Class::THIS).unwrap())
+            Ok(fun.closure.get_symbol("this").unwrap())
         } else {
             Ok(result)
         }
@@ -278,9 +304,11 @@ impl Interpreter {
 
     fn eval_callable(&mut self, call: &Call, callable: &Callable) -> Result<Value> {
         if call.args.len() != callable.arity {
-            error(
+            error!(
                 call.callee.loc,
-                &format!("Expected {} arguments but got {}", callable.arity, call.args.len()),
+                "Expected {} arguments but got {}",
+                callable.arity,
+                call.args.len(),
             );
             return Err(Error::WrongArity);
         }
@@ -302,15 +330,13 @@ impl Interpreter {
             fields: RefCell::new(AHashMap::new()),
         });
 
-        if let Some(initializer) = class.get_method(Class::INITIALIZER_METHOD) {
+        if let Some(initializer) = class.get_method(Class::INIT_METHOD) {
             self.eval_callable(call, &initializer.bind(instance.clone()))?;
         } else if !call.args.is_empty() {
-            error(
+            error!(
                 call.callee.loc,
-                &format!(
-                    "Class doesn't have an initializer, expected no arguments but got {}",
-                    call.args.len()
-                ),
+                "Class doesn't have an initializer, expected no arguments but got {}",
+                call.args.len()
             );
             return Err(Error::WrongArity);
         }
@@ -324,39 +350,10 @@ impl Interpreter {
             Value::Callable(callable) => self.eval_callable(call, &callable),
             Value::Class(class) => self.eval_constructor(call, class),
             _ => {
-                error(
+                error!(
                     call.callee.loc,
-                    &format!("Expected function or constructor but found '{}'", value.error_to_string()),
-                );
-                Err(Error::WrongType)
-            },
-        }
-    }
-
-    fn get_instance(loc: Loc, value: Value) -> Result<Rc<Instance>> {
-        match value {
-            Value::Instance(instance) => Ok(instance),
-            Value::Class(class) => {
-                if let Some(instance) = &class.static_instance {
-                    Ok(instance.clone())
-                } else {
-                    error(
-                        loc,
-                        &format!(
-                            "Properties/methods on class are only allowed for static methods, but '{}' doesn't have any",
-                            class.name
-                        ),
-                    );
-                    Err(Error::WrongType)
-                }
-            },
-            _ => {
-                error(
-                    loc,
-                    &format!(
-                        "Properties/methods only exist on instances but found '{}'",
-                        value.error_to_string()
-                    ),
+                    "Expected function or constructor but found '{}'",
+                    value.error_to_string(),
                 );
                 Err(Error::WrongType)
             },
@@ -364,8 +361,7 @@ impl Interpreter {
     }
 
     fn eval_get(&mut self, loc: Loc, get: &GetProp) -> Result<Value> {
-        let value = self.eval_expr(&get.instance)?;
-        let instance = Self::get_instance(get.instance.loc, value)?;
+        let instance = self.eval_expr(&get.instance)?.get_instance(get.instance.loc)?;
 
         let fields = instance.fields.borrow();
         if let Some(value) = fields.get(&get.property) {
@@ -382,14 +378,13 @@ impl Interpreter {
                 },
             }
         } else {
-            error(loc, &format!("Undefined property/method '{}'", &get.property));
+            error!(loc, "Undefined property/method '{}'", &get.property);
             Err(Error::UndefinedSymbol)
         }
     }
 
     fn eval_set(&mut self, set: &SetProp) -> Result<Value> {
-        let value = self.eval_expr(&set.instance)?;
-        let instance = Self::get_instance(set.instance.loc, value)?;
+        let instance = self.eval_expr(&set.instance)?.get_instance(set.instance.loc)?;
 
         let set_value = self.eval_expr(&set.expr)?;
         instance.fields.borrow_mut().insert(set.property.clone(), set_value.clone());
@@ -413,7 +408,7 @@ impl Interpreter {
             },
             Expr::Logical(binary) => self.eval_logical(binary),
             Expr::Variable(var) | Expr::This(var) => self.get_symbol(&var).ok_or_else(|| {
-                error(expr.loc, &format!("Undefined symbol '{}'", var.name));
+                error!(expr.loc, "Undefined symbol '{}'", var.name);
                 Error::UndefinedSymbol
             }),
             Expr::Assign(assign) => {
@@ -431,7 +426,7 @@ impl Interpreter {
                 };
 
                 let Some(method) = superclass.get_method(&method) else {
-                    error(expr.loc, &format!("Undefined superclass method '{}'", method));
+                    error!(expr.loc, "Undefined superclass method '{method}'");
                     return Err(Error::UndefinedSymbol);
                 };
 
@@ -441,9 +436,9 @@ impl Interpreter {
                     panic!("'super' mustn't be in global scope");
                 };
 
-                let value = self.get_nth_scope(depth - 1).get_symbol(Class::THIS).unwrap();
+                let value = self.get_nth_scope(depth - 1).get_symbol("this").unwrap();
                 let Value::Instance(this) = value else {
-                    panic!("'{}' must be an instance.", Class::THIS)
+                    panic!("'{}' must be an instance.", "this")
                 };
 
                 Ok(Value::Callable(Rc::new(method.bind(this))))
@@ -477,35 +472,32 @@ impl Interpreter {
     }
 
     fn eval_class_decl(&mut self, decl: &ClassDecl) -> Result<()> {
-        let superclass;
-        if let Some(Superclass { loc, var }) = &decl.superclass {
+        let superclass = if let Some(Superclass { loc, var }) = &decl.superclass {
             let super_value = self.get_symbol(var).ok_or_else(|| {
-                error(*loc, &format!("Undefined class '{}'", var.name));
+                error!(*loc, "Undefined class '{}'", var.name);
                 Error::UndefinedSymbol
             })?;
 
             let Value::Class(super_class) = &super_value else {
-                error(
+                error!(
                     *loc,
-                    &format!(
-                        "Expected superclass to be a class but found '{}'",
-                        super_value.error_to_string()
-                    ),
+                    "Expected superclass to be a class but found '{}'",
+                    super_value.error_to_string()
                 );
                 return Err(Error::WrongType);
             };
 
             self.scope = Scope::new(self.scope.clone()); // add 'super' scope
-            self.define_symbol(Class::SUPER.to_owned(), super_value.clone());
+            self.define_symbol("super".to_owned(), super_value.clone());
 
-            superclass = Some(super_class.clone());
+            Some(super_class.clone())
         } else {
-            superclass = None;
-        }
+            None
+        };
 
         let mut methods = AHashMap::new();
         for method in &decl.methods {
-            let value = self.eval_fun_decl(method, method.name == Class::INITIALIZER_METHOD);
+            let value = self.eval_fun_decl(method, method.name == Class::INIT_METHOD);
             methods.insert(method.name.clone(), value);
         }
 
@@ -513,10 +505,7 @@ impl Interpreter {
             self.scope = self.scope.parent.clone().unwrap(); // remove 'super' scope
         }
 
-        let static_instance;
-        if decl.static_methods.is_empty() {
-            static_instance = None;
-        } else {
+        let static_instance = if !decl.static_methods.is_empty() {
             // Create an instance of metaclass which contains static methods of the current class.
 
             let mut static_methods = AHashMap::new();
@@ -532,11 +521,13 @@ impl Interpreter {
                 superclass: None,
             });
 
-            static_instance = Some(Rc::new(Instance {
+            Some(Rc::new(Instance {
                 class: metaclass,
                 fields: RefCell::new(AHashMap::new()),
-            }));
-        }
+            }))
+        } else {
+            None
+        };
 
         let class = Value::Class(Rc::new(Class {
             name: decl.name.clone(),
@@ -601,11 +592,10 @@ impl Interpreter {
                 self.define_symbol(fun.name.clone(), value);
             },
             Stmt::Return(Return { loc: _, expr }) => {
-                let value;
-                if let Some(expr) = expr {
-                    value = self.eval_expr(expr)?;
+                let value = if let Some(expr) = expr {
+                    self.eval_expr(expr)?
                 } else {
-                    value = Value::Nil;
+                    Value::Nil
                 };
 
                 return Err(Error::Return(value));

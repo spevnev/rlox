@@ -34,7 +34,7 @@ enum VarState {
 }
 
 #[derive(PartialEq, Clone, Copy)]
-enum FunType {
+enum FunKind {
     None,
     Function,
     Initializer,
@@ -42,7 +42,7 @@ enum FunType {
 }
 
 #[derive(PartialEq, Clone, Copy)]
-enum ClassType {
+enum ClassKind {
     None,
     Class,
     Subclass,
@@ -50,8 +50,8 @@ enum ClassType {
 
 struct Resolver {
     had_error: bool,
-    current_fun: FunType,
-    current_class: ClassType,
+    current_fun: FunKind,
+    current_class: ClassKind,
     loop_depth: u32,
     scopes: Vec<AHashMap<String, VarState>>,
 }
@@ -64,8 +64,8 @@ impl Resolver {
     fn new() -> Self {
         Self {
             had_error: false,
-            current_fun: FunType::None,
-            current_class: ClassType::None,
+            current_fun: FunKind::None,
+            current_class: ClassKind::None,
             loop_depth: 0,
             scopes: Vec::new(),
         }
@@ -78,7 +78,7 @@ impl Resolver {
 
         if scope.insert(name.to_owned(), VarState::Declared).is_some() {
             self.had_error = true;
-            error(loc, &format!("Redeclaration of symbol '{}'", name));
+            error!(loc, "Redeclaration of symbol '{name}'");
         }
     }
 
@@ -95,7 +95,7 @@ impl Resolver {
         // Define is only valid when the previous state is `None` or `Declared`.
         if prev_state != VarState::Declared {
             self.had_error = true;
-            error(loc, &format!("Redefinition of symbol '{}'", name));
+            error!(loc, "Redefinition of symbol '{name}'");
         }
     }
 
@@ -106,7 +106,7 @@ impl Resolver {
                 match state {
                     VarState::Declared => {
                         self.had_error = true;
-                        error(loc, &format!("Can't read variable '{}' in its own initializer", var.name));
+                        error!(loc, "Can't read variable '{}' in its own initializer", var.name);
                     },
                     VarState::Defined(_) => {
                         if is_read {
@@ -132,10 +132,10 @@ impl Resolver {
         for (name, state) in prev_scope {
             if let VarState::Defined(info) = state {
                 match info.symbol_kind {
-                    SymbolKind::Variable => warning(info.loc, &format!("Unread local variable '{}'", name)),
-                    SymbolKind::Parameter => warning(info.loc, &format!("Unread parameter '{}'", name)),
-                    SymbolKind::Function => warning(info.loc, &format!("Unused local function '{}'", name)),
-                    SymbolKind::Class => warning(info.loc, &format!("Unused local class '{}'", name)),
+                    SymbolKind::Variable => warning!(info.loc, "Unread local variable '{name}'"),
+                    SymbolKind::Parameter => warning!(info.loc, "Unread parameter '{name}'"),
+                    SymbolKind::Function => warning!(info.loc, "Unused local function '{name}'"),
+                    SymbolKind::Class => warning!(info.loc, "Unused local class '{name}'"),
                     SymbolKind::IgnoreUnused => return,
                 }
             }
@@ -173,7 +173,7 @@ impl Resolver {
                 self.resolve_expr(&set.instance);
             },
             Expr::This(var) => {
-                if self.current_class == ClassType::None {
+                if self.current_class == ClassKind::None {
                     self.had_error = true;
                     error(expr.loc, "Cannot use 'this' outside of class");
                 }
@@ -181,13 +181,13 @@ impl Resolver {
                 self.resolve_var(expr.loc, var, true);
             },
             Expr::Super(Super { var, method: _ }) => {
-                if self.current_fun == FunType::Static {
+                if self.current_fun == FunKind::Static {
                     self.had_error = true;
                     error(expr.loc, "Cannot use 'super' in a static method");
-                } else if self.current_class == ClassType::None {
+                } else if self.current_class == ClassKind::None {
                     self.had_error = true;
                     error(expr.loc, "Cannot use 'super' outside of class");
-                } else if self.current_class == ClassType::Class {
+                } else if self.current_class == ClassKind::Class {
                     self.had_error = true;
                     error(expr.loc, "Cannot use 'super' in a class without superclass");
                 }
@@ -202,7 +202,7 @@ impl Resolver {
                 }
 
                 let prev_fun = self.current_fun;
-                self.current_fun = FunType::Function;
+                self.current_fun = FunKind::Function;
                 for stmt in lambda.body.as_ref() {
                     self.resolve_stmt(stmt);
                 }
@@ -213,7 +213,7 @@ impl Resolver {
         }
     }
 
-    fn resolve_fun(&mut self, fun: &FunDecl, fun_type: FunType, symbol_kind: SymbolKind) {
+    fn resolve_fun(&mut self, fun: &FunDecl, fun_kind: FunKind, symbol_kind: SymbolKind) {
         self.define(fun.name_loc, &fun.name, symbol_kind);
 
         self.begin_scope();
@@ -223,7 +223,7 @@ impl Resolver {
         }
 
         let prev_fun = self.current_fun;
-        self.current_fun = fun_type;
+        self.current_fun = fun_kind;
         for stmt in fun.body.as_ref() {
             self.resolve_stmt(stmt);
         }
@@ -245,19 +245,19 @@ impl Resolver {
             }
 
             self.begin_scope(); // 'super' scope
-            self.define(Loc::none(), Class::SUPER, SymbolKind::IgnoreUnused);
-            self.current_class = ClassType::Subclass;
+            self.define(Loc::none(), "super", SymbolKind::IgnoreUnused);
+            self.current_class = ClassKind::Subclass;
         } else {
-            self.current_class = ClassType::Class;
+            self.current_class = ClassKind::Class;
         }
 
         self.begin_scope(); // 'this' scope
-        self.define(Loc::none(), Class::THIS, SymbolKind::IgnoreUnused);
+        self.define(Loc::none(), "this", SymbolKind::IgnoreUnused);
         for method in &decl.methods {
-            if method.name == Class::INITIALIZER_METHOD {
-                self.resolve_fun(method, FunType::Initializer, SymbolKind::IgnoreUnused);
+            if method.name == Class::INIT_METHOD {
+                self.resolve_fun(method, FunKind::Initializer, SymbolKind::IgnoreUnused);
             } else {
-                self.resolve_fun(method, FunType::Function, SymbolKind::IgnoreUnused);
+                self.resolve_fun(method, FunKind::Function, SymbolKind::IgnoreUnused);
             }
         }
         self.end_scope(); // 'this' scope
@@ -266,16 +266,14 @@ impl Resolver {
             self.end_scope(); // 'super' scope
         }
 
-        // TODO: either remove this/super/init variable OR use them everywhere as in error messages, lexer, etc.
-
         self.begin_scope(); // 'this' scope
-        self.define(Loc::none(), Class::THIS, SymbolKind::IgnoreUnused);
+        self.define(Loc::none(), "this", SymbolKind::IgnoreUnused);
         for method in &decl.static_methods {
-            if method.name == Class::INITIALIZER_METHOD {
+            if method.name == Class::INIT_METHOD {
                 self.had_error = true;
                 error(method.name_loc, "Class cannot have static 'init' method.");
             } else {
-                self.resolve_fun(method, FunType::Static, SymbolKind::IgnoreUnused);
+                self.resolve_fun(method, FunKind::Static, SymbolKind::IgnoreUnused);
             }
         }
         self.end_scope(); // 'this' scope
@@ -323,15 +321,15 @@ impl Resolver {
                 self.resolve_expr(init);
                 self.define(*name_loc, name, SymbolKind::Variable);
             },
-            Stmt::FunDecl(fun) => self.resolve_fun(fun, FunType::Function, SymbolKind::Function),
+            Stmt::FunDecl(fun) => self.resolve_fun(fun, FunKind::Function, SymbolKind::Function),
             Stmt::Return(Return { loc, expr }) => {
-                if self.current_fun == FunType::None {
+                if self.current_fun == FunKind::None {
                     self.had_error = true;
                     error(*loc, "Return outside of function");
                 }
 
                 if let Some(expr) = expr {
-                    if self.current_fun == FunType::Initializer {
+                    if self.current_fun == FunKind::Initializer {
                         self.had_error = true;
                         error(expr.loc, "Cannot return value from initializer");
                     }

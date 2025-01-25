@@ -341,13 +341,13 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
                     value = Value::Number(number);
                     TokenKind::Number
                 } else {
-                    error(loc, &format!("Unable to parse number '{}'", &source[start..lexer.index]));
+                    error!(loc, "Unable to parse number '{}'", &source[start..lexer.index]);
                     had_error = true;
                     continue;
                 }
             },
             c => {
-                error(loc, &format!("Unknown character '{c}'"));
+                error!(loc, "Unknown character '{c}'");
                 had_error = true;
                 continue;
             },

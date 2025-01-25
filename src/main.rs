@@ -11,6 +11,7 @@ use lexer::tokenize;
 use parser::parse;
 use resolver::resolve;
 
+#[macro_use]
 mod error;
 mod interpreter;
 mod lexer;
@@ -66,7 +67,7 @@ fn run_file(path: &str) -> ExitCode {
     let source = match fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) => {
-            eprintln!("Unable to read file \"{path}\": {error}");
+            eprintln!("Unable to read file \"{}\": {}", path, error);
             return ExitCode::FAILURE;
         },
     };

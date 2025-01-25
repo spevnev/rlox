@@ -38,10 +38,7 @@ pub struct Class {
 }
 
 impl Class {
-    pub const THIS: &'static str = "this";
-    pub const SUPER: &'static str = "super";
-
-    pub const INITIALIZER_METHOD: &'static str = "init";
+    pub const INIT_METHOD: &'static str = "init";
 
     pub fn get_method(&self, name: &str) -> Option<Rc<Callable>> {
         if let Some(method) = self.methods.get(name) {
@@ -80,7 +77,7 @@ impl Value {
             Value::Bool(bool) => bool.to_string(),
             Value::Nil => "nil".to_owned(),
             Value::Callable(callable) => match &callable.name {
-                Some(name) => format!("<fn {}>", name),
+                Some(name) => format!("<fn {name}>"),
                 None => "<fn>".to_owned(),
             },
             Value::Class(class) => class.name.clone(),

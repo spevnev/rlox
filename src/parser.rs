@@ -3,7 +3,7 @@ use std::{cell::Cell, rc::Rc};
 use crate::{
     error::{error, Loc},
     lexer::{Token, TokenKind},
-    value::{Class, Value},
+    value::Value,
 };
 
 pub struct Unary {
@@ -207,7 +207,7 @@ impl LocExpr {
     fn new_this(loc: Loc) -> Self {
         Self {
             loc,
-            expr: Expr::This(Var::new(Class::THIS.to_owned())),
+            expr: Expr::This(Var::new("this".to_owned())),
         }
     }
 
@@ -215,7 +215,7 @@ impl LocExpr {
         Self {
             loc,
             expr: Expr::Super(Super {
-                var: Var::new(Class::SUPER.to_owned()),
+                var: Var::new("super".to_owned()),
                 method,
             }),
         }
@@ -484,10 +484,7 @@ impl Parser {
                 Ok(LocExpr::new_lambda(token.loc, params, body))
             },
             _ => {
-                error(
-                    token.loc,
-                    &format!("Expected an expression but found '{}'", token.kind.to_string()),
-                );
+                error!(token.loc, "Expected an expression but found '{}'", token.kind.to_string(),);
                 Err(())
             },
         }
@@ -510,7 +507,7 @@ impl Parser {
         }
         if args.len() > Self::MAX_ARGS {
             self.had_error = true;
-            error(error_loc, &format!("The max number of arguments is {}", Self::MAX_ARGS));
+            error!(error_loc, "The max number of arguments is {}", Self::MAX_ARGS);
         }
         self.consume(TokenKind::RightParen)
             .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '(', expected ')' after the arguments"))?;
@@ -732,14 +729,13 @@ impl Parser {
         self.consume(TokenKind::LeftParen)
             .ok_or_else(|| error(self.loc(), "Expected '(' after 'for'"))?;
 
-        let initializer;
-        if self.try_consume(TokenKind::Semicolon) {
-            initializer = None;
+        let initializer = if self.try_consume(TokenKind::Semicolon) {
+            None
         } else if self.is_next(TokenKind::Var) {
-            initializer = Some(self.parse_var_decl()?);
+            Some(self.parse_var_decl()?)
         } else {
-            initializer = Some(self.parse_expr_stmt()?);
-        }
+            Some(self.parse_expr_stmt()?)
+        };
 
         let condition;
         if self.try_consume(TokenKind::Semicolon) {
@@ -879,7 +875,7 @@ impl Parser {
         }
         if params.len() > Self::MAX_ARGS {
             self.had_error = true;
-            error(error_loc, &format!("The max number of parameters is {}", Self::MAX_ARGS));
+            error!(error_loc, "The max number of parameters is {}", Self::MAX_ARGS);
         }
         self.consume(TokenKind::RightParen)
             .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '(', expected ')' after the parameters"))?;
