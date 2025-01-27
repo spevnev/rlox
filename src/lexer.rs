@@ -3,6 +3,8 @@ use crate::{
     value::Value,
 };
 
+type Result<V, E = ()> = std::result::Result<V, E>;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
     // One or two character tokens
@@ -207,7 +209,7 @@ impl Lexer {
     }
 }
 
-pub fn tokenize(source: &str) -> Result<Vec<Token>, ()> {
+pub fn tokenize(source: &str) -> Result<Vec<Token>> {
     if !source.is_ascii() {
         eprintln!("[ERROR] non-ASCII characters aren't supported.");
         return Err(());

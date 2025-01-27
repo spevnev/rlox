@@ -6,6 +6,8 @@ use crate::{
     value::Value,
 };
 
+type Result<V, E = ()> = std::result::Result<V, E>;
+
 pub struct Unary {
     pub op: TokenKind,
     pub expr: Box<LocExpr>,
@@ -436,7 +438,7 @@ impl Parser {
         }
     }
 
-    fn parse_primary(&mut self) -> Result<LocExpr, ()> {
+    fn parse_primary(&mut self) -> Result<LocExpr> {
         let Some(token) = self.advance() else {
             error(self.last_loc, "Expected an expression but reached the end");
             return Err(());
@@ -490,7 +492,7 @@ impl Parser {
         }
     }
 
-    fn parse_args(&mut self) -> Result<Vec<LocExpr>, ()> {
+    fn parse_args(&mut self) -> Result<Vec<LocExpr>> {
         let mut args = Vec::new();
 
         if self.try_consume(TokenKind::RightParen) {
@@ -515,7 +517,7 @@ impl Parser {
         Ok(args)
     }
 
-    fn parse_call(&mut self) -> Result<LocExpr, ()> {
+    fn parse_call(&mut self) -> Result<LocExpr> {
         let mut expr = self.parse_primary()?;
 
         while !self.is_done() {
@@ -540,7 +542,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_unary(&mut self) -> Result<LocExpr, ()> {
+    fn parse_unary(&mut self) -> Result<LocExpr> {
         if self.is_next_many(&[TokenKind::Bang, TokenKind::Minus]) {
             let op = self.advance().unwrap();
             let expr = self.parse_unary()?;
@@ -550,7 +552,7 @@ impl Parser {
         }
     }
 
-    fn parse_mult(&mut self) -> Result<LocExpr, ()> {
+    fn parse_mult(&mut self) -> Result<LocExpr> {
         let mut expr = self.parse_unary()?;
 
         while self.is_next_many(&[TokenKind::Star, TokenKind::Slash]) {
@@ -562,7 +564,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_addition(&mut self) -> Result<LocExpr, ()> {
+    fn parse_addition(&mut self) -> Result<LocExpr> {
         let mut expr = self.parse_mult()?;
 
         while self.is_next_many(&[TokenKind::Plus, TokenKind::Minus]) {
@@ -574,7 +576,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_comparison(&mut self) -> Result<LocExpr, ()> {
+    fn parse_comparison(&mut self) -> Result<LocExpr> {
         let mut expr = self.parse_addition()?;
 
         while self.is_next_many(&[
@@ -591,7 +593,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_equality(&mut self) -> Result<LocExpr, ()> {
+    fn parse_equality(&mut self) -> Result<LocExpr> {
         let mut expr = self.parse_comparison()?;
 
         while self.is_next_many(&[TokenKind::EqualEqual, TokenKind::BangEqual]) {
@@ -603,7 +605,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_logic_and(&mut self) -> Result<LocExpr, ()> {
+    fn parse_logic_and(&mut self) -> Result<LocExpr> {
         let mut expr = self.parse_equality()?;
 
         while self.is_next(TokenKind::And) {
@@ -615,7 +617,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_logic_or(&mut self) -> Result<LocExpr, ()> {
+    fn parse_logic_or(&mut self) -> Result<LocExpr> {
         let mut expr = self.parse_logic_and()?;
 
         while self.is_next(TokenKind::Or) {
@@ -627,7 +629,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_ternary(&mut self) -> Result<LocExpr, ()> {
+    fn parse_ternary(&mut self) -> Result<LocExpr> {
         let mut expr = self.parse_logic_or()?;
 
         if self.try_consume(TokenKind::Question) {
@@ -641,7 +643,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_assignment(&mut self) -> Result<LocExpr, ()> {
+    fn parse_assignment(&mut self) -> Result<LocExpr> {
         let l_expr = self.parse_ternary()?;
 
         if !self.try_consume(TokenKind::Equal) {
@@ -666,11 +668,11 @@ impl Parser {
         }
     }
 
-    fn parse_expr(&mut self) -> Result<LocExpr, ()> {
+    fn parse_expr(&mut self) -> Result<LocExpr> {
         self.parse_assignment()
     }
 
-    fn parse_expr_stmt(&mut self) -> Result<Stmt, ()> {
+    fn parse_expr_stmt(&mut self) -> Result<Stmt> {
         let expr = self.parse_expr()?;
         self.consume(TokenKind::Semicolon)
             .ok_or_else(|| error(self.loc_after_prev(), "Expected a semicolon after the expression"))?;
@@ -678,7 +680,7 @@ impl Parser {
         Ok(Stmt::Expr(expr))
     }
 
-    fn parse_print_stmt(&mut self) -> Result<Stmt, ()> {
+    fn parse_print_stmt(&mut self) -> Result<Stmt> {
         self.expect(TokenKind::Print);
         let expr = self.parse_expr()?;
         self.consume(TokenKind::Semicolon)
@@ -687,7 +689,7 @@ impl Parser {
         Ok(Stmt::Print(expr))
     }
 
-    fn parse_if_stmt(&mut self) -> Result<Stmt, ()> {
+    fn parse_if_stmt(&mut self) -> Result<Stmt> {
         self.expect(TokenKind::If);
 
         self.consume(TokenKind::LeftParen)
@@ -710,7 +712,7 @@ impl Parser {
         }))
     }
 
-    fn parse_while_stmt(&mut self) -> Result<Stmt, ()> {
+    fn parse_while_stmt(&mut self) -> Result<Stmt> {
         self.expect(TokenKind::While);
         self.consume(TokenKind::LeftParen)
             .ok_or_else(|| error(self.loc(), "Expected '(' after 'while'"))?;
@@ -724,7 +726,7 @@ impl Parser {
         Ok(Stmt::While(While { condition, body }))
     }
 
-    fn parse_for_stmt(&mut self) -> Result<Stmt, ()> {
+    fn parse_for_stmt(&mut self) -> Result<Stmt> {
         self.expect(TokenKind::For);
         self.consume(TokenKind::LeftParen)
             .ok_or_else(|| error(self.loc(), "Expected '(' after 'for'"))?;
@@ -774,7 +776,7 @@ impl Parser {
         }
     }
 
-    fn parse_return_stmt(&mut self) -> Result<Stmt, ()> {
+    fn parse_return_stmt(&mut self) -> Result<Stmt> {
         let return_token = self.expect(TokenKind::Return);
 
         if self.try_consume(TokenKind::Semicolon) {
@@ -794,7 +796,7 @@ impl Parser {
         }
     }
 
-    fn parse_block(&mut self) -> Result<Vec<Stmt>, ()> {
+    fn parse_block(&mut self) -> Result<Vec<Stmt>> {
         let mut stmts = Vec::new();
 
         self.expect(TokenKind::LeftBrace);
@@ -809,7 +811,7 @@ impl Parser {
         Ok(stmts)
     }
 
-    fn parse_stmt(&mut self) -> Result<Stmt, ()> {
+    fn parse_stmt(&mut self) -> Result<Stmt> {
         match self.peek().unwrap().kind {
             TokenKind::Print => self.parse_print_stmt(),
             TokenKind::If => self.parse_if_stmt(),
@@ -827,7 +829,7 @@ impl Parser {
         }
     }
 
-    fn parse_var_decl(&mut self) -> Result<Stmt, ()> {
+    fn parse_var_decl(&mut self) -> Result<Stmt> {
         self.expect(TokenKind::Var);
         let name_token = self
             .consume(TokenKind::Identifier)
@@ -847,7 +849,7 @@ impl Parser {
         }))
     }
 
-    fn parse_param(&mut self) -> Result<FunParam, ()> {
+    fn parse_param(&mut self) -> Result<FunParam> {
         let param_token = self
             .consume(TokenKind::Identifier)
             .ok_or_else(|| error(self.loc(), "Expected a parameter name in parameter list"))?;
@@ -858,7 +860,7 @@ impl Parser {
         })
     }
 
-    fn parse_params(&mut self) -> Result<Vec<FunParam>, ()> {
+    fn parse_params(&mut self) -> Result<Vec<FunParam>> {
         let mut params = Vec::new();
 
         if self.try_consume(TokenKind::RightParen) {
@@ -883,7 +885,7 @@ impl Parser {
         Ok(params)
     }
 
-    fn parse_fun_decl(&mut self) -> Result<Stmt, ()> {
+    fn parse_fun_decl(&mut self) -> Result<Stmt> {
         self.expect(TokenKind::Fun);
 
         let name_token = self
@@ -909,7 +911,7 @@ impl Parser {
         }))
     }
 
-    fn parse_class_decl(&mut self) -> Result<Stmt, ()> {
+    fn parse_class_decl(&mut self) -> Result<Stmt> {
         self.expect(TokenKind::Class);
         let name_token = self
             .consume(TokenKind::Identifier)
@@ -1010,7 +1012,7 @@ impl Parser {
     }
 }
 
-pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, ()> {
+pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>> {
     if tokens.is_empty() {
         return Ok(Vec::new());
     }

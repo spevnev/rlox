@@ -9,6 +9,8 @@ use crate::{
     value::Class,
 };
 
+type Result<V, E = ()> = std::result::Result<V, E>;
+
 #[derive(PartialEq)]
 enum SymbolKind {
     Variable,
@@ -342,7 +344,7 @@ impl Resolver {
     }
 }
 
-pub fn resolve(stmts: &Vec<Stmt>) -> Result<(), ()> {
+pub fn resolve(stmts: &Vec<Stmt>) -> Result<()> {
     let mut resolver = Resolver::new();
 
     for stmt in stmts {
