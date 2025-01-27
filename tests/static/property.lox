@@ -1,0 +1,8 @@
+class Math {
+    class circle_area(r) {
+        return r * r * this.pi;
+    }
+}
+
+Math.pi = 3.14; /// sets static property
+print Math.circle_area(4); // 50.24

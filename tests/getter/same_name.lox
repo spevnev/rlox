@@ -1,0 +1,13 @@
+class Circle {
+    init(radius) {
+        this.radius = radius;
+    }
+
+    area {
+        return 3.14 * this.radius * this.radius;
+    }
+
+    area() { // [ERROR] Redefinition of symbol 'area' at 10:5.
+        return 3.14 * this.radius * this.radius;
+    }
+}

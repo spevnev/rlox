@@ -1,0 +1,15 @@
+class Math {
+    add(a, b) {
+        return a + b;
+    }
+
+    class add(a, b) {
+        return a + b;
+    }
+}
+
+/// Static methods can have same names as non-static methods because
+/// instances don't have static methods and class non-static.
+var m = Math();
+print m.add(1, 2); // 3
+print Math.add(3, 4); // 7

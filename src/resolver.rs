@@ -271,7 +271,7 @@ impl Resolver {
         for method in &decl.static_methods {
             if method.name == Class::INIT_METHOD {
                 self.had_error = true;
-                error(method.name_loc, "Class cannot have static 'init' method.");
+                error(method.name_loc, "Class cannot have static 'init' method");
             } else {
                 self.resolve_fun(method, FunKind::Static, SymbolKind::IgnoreUnused);
             }

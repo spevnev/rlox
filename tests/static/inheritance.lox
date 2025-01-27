@@ -1,0 +1,11 @@
+class Math {
+    class add(a, b) {
+        return a + b;
+    }
+}
+
+/// Static methods are NOT inherited.
+class M < Math {}
+
+print Math.add(1,2); // 3
+print M.add(3,4); // [ERROR] Properties/methods on class are only allowed for static methods, but 'M' doesn't have any at 11:7.

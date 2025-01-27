@@ -1,0 +1,9 @@
+class Math {
+    class square(n) {
+        return n * n;
+    }
+}
+
+/// Cannot call static method on an instance.
+var m = Math();
+print m.square(3); // [ERROR] Undefined property/method 'square' at 9:9.

@@ -1,0 +1,8 @@
+class UnitCircle {
+    class area {
+        var radius = 1;
+        return 3.14 * radius * radius;
+    }
+}
+
+print UnitCircle.area; // 3.14

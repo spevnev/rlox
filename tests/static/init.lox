@@ -1,0 +1,3 @@
+class A {
+    class init() {} // [ERROR] Class cannot have static 'init' method at 2:11.
+}
