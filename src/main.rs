@@ -32,6 +32,11 @@ impl Options {
 
 pub static OPTIONS: OnceLock<Options> = OnceLock::new();
 
+/// Exit codes from sysexit.h (https://man.openbsd.org/sysexits):
+const EX_USAGE: u8 = 64;
+const EX_DATA_ERROR: u8 = 65;
+const EX_NO_INPUT: u8 = 66;
+
 fn run_repl() -> ExitCode {
     let mut interpreter = Interpreter::new();
     let mut line = String::new();
@@ -68,18 +73,18 @@ fn run_file(path: &str) -> ExitCode {
         Ok(source) => source,
         Err(error) => {
             eprintln!("Unable to read file \"{}\": {}", path, error);
-            return ExitCode::FAILURE;
+            return ExitCode::from(EX_NO_INPUT);
         },
     };
 
     let Ok(tokens) = tokenize(&source) else {
-        return ExitCode::FAILURE;
+        return ExitCode::from(EX_DATA_ERROR);
     };
     let Ok(stmts) = parse(tokens) else {
-        return ExitCode::FAILURE;
+        return ExitCode::from(EX_DATA_ERROR);
     };
     let Ok(_) = resolve(&stmts) else {
-        return ExitCode::FAILURE;
+        return ExitCode::from(EX_DATA_ERROR);
     };
     let Ok(_) = Interpreter::new().eval(&stmts) else {
         return ExitCode::FAILURE;
@@ -110,7 +115,7 @@ Options:
         ExitCode::SUCCESS
     } else {
         stderr().write(usage.as_bytes()).unwrap();
-        ExitCode::FAILURE
+        ExitCode::from(EX_USAGE)
     }
 }
 
