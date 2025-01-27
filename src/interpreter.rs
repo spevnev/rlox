@@ -5,7 +5,7 @@ use ahash::AHashMap;
 use crate::{
     error::{error, Loc},
     lexer::TokenKind,
-    native::get_native_functions_as_symbols,
+    native::create_native_fun_hashmap,
     parser::{
         Binary, Call, ClassDecl, Expr, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Super, Superclass, Unary,
         Var, VarScope, While,
@@ -54,7 +54,7 @@ impl Scope {
     fn new_global() -> Rc<Self> {
         Rc::new(Self {
             parent: None,
-            symbols: RefCell::new(get_native_functions_as_symbols()),
+            symbols: RefCell::new(create_native_fun_hashmap()),
         })
     }
 
@@ -392,8 +392,8 @@ impl Interpreter {
         Ok(set_value)
     }
 
-    fn eval_expr(&mut self, expr: &LocExpr) -> Result<Value> {
-        match &expr.expr {
+    fn eval_expr(&mut self, LocExpr { loc, expr }: &LocExpr) -> Result<Value> {
+        match expr {
             Expr::Literal(value) => Ok(value.clone()),
             Expr::Grouping(expr) => self.eval_expr(expr),
             Expr::Unary(unary) => self.eval_unary(unary),
@@ -408,16 +408,16 @@ impl Interpreter {
             },
             Expr::Logical(binary) => self.eval_logical(binary),
             Expr::Variable(var) | Expr::This(var) => self.get_symbol(&var).ok_or_else(|| {
-                error!(expr.loc, "Undefined symbol '{}'", var.name);
+                error!(*loc, "Undefined symbol '{}'", var.name);
                 Error::UndefinedSymbol
             }),
             Expr::Assign(assign) => {
                 let value = self.eval_expr(&assign.expr)?;
-                self.set_var(expr.loc, &assign.var, value.clone())?;
+                self.set_var(*loc, &assign.var, value.clone())?;
                 Ok(value)
             },
             Expr::Call(call) => self.eval_call(call),
-            Expr::GetProp(get) => self.eval_get(expr.loc, get),
+            Expr::GetProp(get) => self.eval_get(*loc, get),
             Expr::SetProp(set) => self.eval_set(set),
             Expr::Super(Super { var, method }) => {
                 let Some(Value::Class(superclass)) = self.get_symbol(var) else {
@@ -426,7 +426,7 @@ impl Interpreter {
                 };
 
                 let Some(method) = superclass.get_method(&method) else {
-                    error!(expr.loc, "Undefined superclass method '{method}'");
+                    error!(*loc, "Undefined superclass method '{method}'");
                     return Err(Error::UndefinedSymbol);
                 };
 

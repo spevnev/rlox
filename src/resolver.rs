@@ -59,7 +59,8 @@ struct Resolver {
 /// Resolver binds local variables to specific instances by settings their `scope`.
 /// Global variables are resolved at runtime since it is valid to declare them after
 /// they are used by a function, provided that the declaration is evaluated before it.
-/// Additionally, it validates usage of `return` and `this`.
+/// Additionally, it performs a number of checks and validations, such as usage of
+/// `this`, `super`, `break`, `return`.
 impl Resolver {
     fn new() -> Self {
         Self {
@@ -142,8 +143,8 @@ impl Resolver {
         }
     }
 
-    fn resolve_expr(&mut self, expr: &LocExpr) {
-        match &expr.expr {
+    fn resolve_expr(&mut self, LocExpr { loc, expr }: &LocExpr) {
+        match expr {
             Expr::Literal(_) => {},
             Expr::Grouping(expr) => self.resolve_expr(expr),
             Expr::Unary(unary) => self.resolve_expr(&unary.expr),
@@ -156,7 +157,7 @@ impl Resolver {
                 self.resolve_expr(&ternary.then_expr);
                 self.resolve_expr(&ternary.else_expr);
             },
-            Expr::Variable(var) => self.resolve_var(expr.loc, var, true),
+            Expr::Variable(var) => self.resolve_var(*loc, var, true),
             Expr::Assign(Assign { var, expr }) => {
                 self.resolve_expr(expr);
                 self.resolve_var(expr.loc, var, false);
@@ -175,24 +176,24 @@ impl Resolver {
             Expr::This(var) => {
                 if self.current_class == ClassKind::None {
                     self.had_error = true;
-                    error(expr.loc, "Cannot use 'this' outside of class");
+                    error(*loc, "Cannot use 'this' outside of class");
                 }
 
-                self.resolve_var(expr.loc, var, true);
+                self.resolve_var(*loc, var, true);
             },
             Expr::Super(Super { var, method: _ }) => {
                 if self.current_fun == FunKind::Static {
                     self.had_error = true;
-                    error(expr.loc, "Cannot use 'super' in a static method");
+                    error(*loc, "Cannot use 'super' in a static method");
                 } else if self.current_class == ClassKind::None {
                     self.had_error = true;
-                    error(expr.loc, "Cannot use 'super' outside of class");
+                    error(*loc, "Cannot use 'super' outside of class");
                 } else if self.current_class == ClassKind::Class {
                     self.had_error = true;
-                    error(expr.loc, "Cannot use 'super' in a class without superclass");
+                    error(*loc, "Cannot use 'super' in a class without superclass");
                 }
 
-                self.resolve_var(expr.loc, var, true);
+                self.resolve_var(*loc, var, true);
             },
             Expr::Lambda(lambda) => {
                 self.begin_scope();

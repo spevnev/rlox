@@ -288,7 +288,7 @@ pub enum Stmt {
     VarDecl(VarDecl),
     FunDecl(FunDecl),
     Return(Return),
-    ClassDecl(Rc<ClassDecl>),
+    ClassDecl(ClassDecl),
 }
 
 struct Parser {
@@ -978,7 +978,7 @@ impl Parser {
         self.consume(TokenKind::RightBrace)
             .ok_or_else(|| error(self.loc_after_prev(), "Unclosed '{', expected '}' after class body"))?;
 
-        Ok(Stmt::ClassDecl(Rc::new(decl)))
+        Ok(Stmt::ClassDecl(decl))
     }
 
     fn parse_decl(&mut self) -> Option<Stmt> {
