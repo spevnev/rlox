@@ -7,8 +7,8 @@ use crate::{
     lexer::TokenKind,
     native::create_native_fun_hashmap,
     parser::{
-        Binary, Call, ClassDecl, Expr, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Super, Superclass, Unary,
-        Var, VarScope, While,
+        Binary, Call, ClassDecl, Expr, For, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Super, Superclass,
+        Unary, Var, VarScope, While,
     },
     value::{Callable, Class, Function, Instance, LoxFun, Value},
 };
@@ -21,6 +21,7 @@ pub enum Error {
     // The following aren't actual errors, and are used to quickly return from a deeply nested call:
     Return(Value),
     Break,
+    Continue,
 }
 
 /// Debug trait is required in order to panic.
@@ -32,6 +33,7 @@ impl Debug for Error {
             Self::WrongArity => write!(f, "WrongArity"),
             Self::Return(_) => panic!("Panic on 'return' must be impossible."),
             Self::Break => panic!("Panic on 'break' must be impossible."),
+            Self::Continue => panic!("Panic on 'continue' must be impossible."),
         }
     }
 }
@@ -577,12 +579,41 @@ impl Interpreter {
                 while self.eval_expr(condition)?.is_truthy() {
                     match self.eval_stmt(body) {
                         Err(Error::Break) => break,
+                        Err(Error::Continue) => {},
                         Ok(_) => {},
                         Err(err) => return Err(err),
-                    }
+                    };
                 }
             },
+            Stmt::For(For {
+                initializer,
+                condition,
+                update,
+                body,
+            }) => {
+                let new_scope = Scope::new(self.scope.clone());
+                let prev_scope = mem::replace(&mut self.scope, new_scope);
+
+                if let Some(initializer) = initializer {
+                    self.eval_stmt(&initializer)?;
+                }
+                while self.eval_expr(condition)?.is_truthy() {
+                    match self.eval_stmt(body) {
+                        Err(Error::Break) => break,
+                        Err(Error::Continue) => {},
+                        Ok(_) => {},
+                        Err(err) => return Err(err),
+                    };
+
+                    if let Some(update) = update {
+                        self.eval_expr(update)?;
+                    }
+                }
+
+                self.scope = prev_scope;
+            },
             Stmt::Break(_) => return Err(Error::Break),
+            Stmt::Continue(_) => return Err(Error::Continue),
             Stmt::VarDecl(var) => {
                 let value = self.eval_expr(&var.init)?;
                 self.define_symbol(var.name.clone(), value);

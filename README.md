@@ -4,7 +4,8 @@ Tree-walk Lox interpreter from [Crafting Interpreters](https://craftinginterpret
 
 ## Additional features
 
-- `break`
+- `break` and `continue`
+
 - conditional operator (`?:`)
     ```python
     print condition ? 'true' : 'false';

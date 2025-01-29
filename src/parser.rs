@@ -242,6 +242,13 @@ pub struct While {
     pub body: Box<Stmt>,
 }
 
+pub struct For {
+    pub initializer: Option<Box<Stmt>>,
+    pub condition: LocExpr,
+    pub update: Option<LocExpr>,
+    pub body: Box<Stmt>,
+}
+
 pub struct VarDecl {
     pub name_loc: Loc,
     pub name: String,
@@ -286,7 +293,9 @@ pub enum Stmt {
     Block(Vec<Stmt>),
     If(If),
     While(While),
+    For(For),
     Break(Loc),
+    Continue(Loc),
     VarDecl(VarDecl),
     FunDecl(FunDecl),
     Return(Return),
@@ -737,14 +746,14 @@ impl<'a> Parser<'a> {
         let initializer = if self.try_consume(TokenKind::Semicolon) {
             None
         } else if self.is_next(TokenKind::Var) {
-            Some(self.parse_var_decl()?)
+            Some(Box::new(self.parse_var_decl()?))
         } else {
-            Some(self.parse_expr_stmt()?)
+            Some(Box::new(self.parse_expr_stmt()?))
         };
 
         let condition;
         if self.try_consume(TokenKind::Semicolon) {
-            // `for` without condition is infinite, so use `while (true)`.
+            // `for` without condition is infinite, so just set it to `true`.
             condition = LocExpr::new_literal(Loc::none(), Value::Bool(true));
         } else {
             condition = self.parse_expr()?;
@@ -756,27 +765,19 @@ impl<'a> Parser<'a> {
         if self.try_consume(TokenKind::RightParen) {
             update = None;
         } else {
-            update = Some(Stmt::Expr(self.parse_expr()?));
+            update = Some(self.parse_expr()?);
             self.consume(TokenKind::RightParen)
                 .ok_or_else(|| self.error(self.loc_after_prev(), "Unclosed '(', expected ')'"))?;
         }
 
-        let body = self.parse_stmt()?;
+        let body = Box::new(self.parse_stmt()?);
 
-        // Instead of adding a new statement kind, `for` is transformed into `while`.
-        let while_body = match update {
-            Some(update) => Stmt::Block(vec![body, update]),
-            None => body,
-        };
-        let while_loop = Stmt::While(While {
+        Ok(Stmt::For(For {
+            initializer,
             condition,
-            body: Box::new(while_body),
-        });
-
-        match initializer {
-            Some(initializer) => Ok(Stmt::Block(vec![initializer, while_loop])),
-            None => Ok(while_loop),
-        }
+            update,
+            body,
+        }))
     }
 
     fn parse_return_stmt(&mut self) -> Result<Stmt> {
@@ -824,6 +825,12 @@ impl<'a> Parser<'a> {
                 self.consume(TokenKind::Semicolon)
                     .ok_or_else(|| self.error(self.loc(), "Expected a semicolon after the break statement"))?;
                 Ok(Stmt::Break(token.loc))
+            },
+            TokenKind::Continue => {
+                let token = self.advance().unwrap();
+                self.consume(TokenKind::Semicolon)
+                    .ok_or_else(|| self.error(self.loc(), "Expected a semicolon after the continue statement"))?;
+                Ok(Stmt::Continue(token.loc))
             },
             TokenKind::For => self.parse_for_stmt(),
             TokenKind::Return => self.parse_return_stmt(),

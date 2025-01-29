@@ -3,8 +3,8 @@ use ahash::AHashMap;
 use crate::{
     error::{error, warning, Loc},
     parser::{
-        Assign, Binary, Call, ClassDecl, Expr, FunDecl, If, LocExpr, Return, Stmt, Super, Superclass, Var, VarDecl,
-        VarScope, While,
+        Assign, Binary, Call, ClassDecl, Expr, For, FunDecl, If, LocExpr, Return, Stmt, Super, Superclass, Var,
+        VarDecl, VarScope, While,
     },
     value::Class,
 };
@@ -311,10 +311,35 @@ impl Resolver {
                 self.resolve_stmt(body);
                 self.loop_depth -= 1;
             },
+            Stmt::For(For {
+                initializer,
+                condition,
+                update,
+                body,
+            }) => {
+                self.begin_scope();
+                if let Some(initializer) = initializer {
+                    self.resolve_stmt(initializer);
+                }
+                self.resolve_expr(condition);
+                self.loop_depth += 1;
+                self.resolve_stmt(body);
+                self.loop_depth -= 1;
+                if let Some(update) = update {
+                    self.resolve_expr(update);
+                }
+                self.end_scope();
+            },
             Stmt::Break(loc) => {
                 if self.loop_depth == 0 {
                     self.had_error = true;
-                    error(*loc, "Break outside of loop");
+                    error(*loc, "Cannot break outside of loop");
+                }
+            },
+            Stmt::Continue(loc) => {
+                if self.loop_depth == 0 {
+                    self.had_error = true;
+                    error(*loc, "Cannot continue outside of loop");
                 }
             },
             Stmt::VarDecl(VarDecl { name_loc, name, init }) => {
@@ -328,7 +353,7 @@ impl Resolver {
             Stmt::Return(Return { loc, expr }) => {
                 if self.current_fun == FunKind::None {
                     self.had_error = true;
-                    error(*loc, "Return outside of function");
+                    error(*loc, "Cannot return outside of function");
                 }
 
                 if let Some(expr) = expr {

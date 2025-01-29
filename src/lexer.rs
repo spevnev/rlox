@@ -39,6 +39,7 @@ pub enum TokenKind {
     And,
     Break,
     Class,
+    Continue,
     Else,
     False,
     Fun,
@@ -85,6 +86,7 @@ impl TokenKind {
             TokenKind::And => "and",
             TokenKind::Break => "break",
             TokenKind::Class => "class",
+            TokenKind::Continue => "continue",
             TokenKind::Else => "else",
             TokenKind::False => "false",
             TokenKind::Fun => "fun",
@@ -104,23 +106,24 @@ impl TokenKind {
 }
 
 static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map! {
-    "and"    => TokenKind::And,
-    "break"  => TokenKind::Break,
-    "class"  => TokenKind::Class,
-    "else"   => TokenKind::Else,
-    "false"  => TokenKind::False,
-    "for"    => TokenKind::For,
-    "fun"    => TokenKind::Fun,
-    "if"     => TokenKind::If,
-    "nil"    => TokenKind::Nil,
-    "or"     => TokenKind::Or,
-    "print"  => TokenKind::Print,
-    "return" => TokenKind::Return,
-    "super"  => TokenKind::Super,
-    "this"   => TokenKind::This,
-    "true"   => TokenKind::True,
-    "var"    => TokenKind::Var,
-    "while"  => TokenKind::While
+    "and"      => TokenKind::And,
+    "break"    => TokenKind::Break,
+    "class"    => TokenKind::Class,
+    "continue" => TokenKind::Continue,
+    "else"     => TokenKind::Else,
+    "false"    => TokenKind::False,
+    "for"      => TokenKind::For,
+    "fun"      => TokenKind::Fun,
+    "if"       => TokenKind::If,
+    "nil"      => TokenKind::Nil,
+    "or"       => TokenKind::Or,
+    "print"    => TokenKind::Print,
+    "return"   => TokenKind::Return,
+    "super"    => TokenKind::Super,
+    "this"     => TokenKind::This,
+    "true"     => TokenKind::True,
+    "var"      => TokenKind::Var,
+    "while"    => TokenKind::While
 };
 
 #[derive(Clone)]
