@@ -25,6 +25,10 @@ macro_rules! warning {
     }};
 }
 
+pub fn format_error(loc: Loc, message: &str) -> String {
+    format!("[ERROR] {} at {}:{}.", message, loc.line, loc.column)
+}
+
 pub fn error(loc: Loc, message: &str) {
     eprintln!("[ERROR] {} at {}:{}.", message, loc.line, loc.column);
 }

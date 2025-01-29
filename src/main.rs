@@ -8,7 +8,7 @@ use std::{
 
 use interpreter::Interpreter;
 use lexer::tokenize;
-use parser::parse;
+use parser::{parse, parse_expr};
 use resolver::resolve;
 
 #[macro_use]
@@ -32,7 +32,7 @@ impl Options {
 
 pub static OPTIONS: OnceLock<Options> = OnceLock::new();
 
-/// Exit codes from sysexit.h (https://man.openbsd.org/sysexits):
+/// Exit codes from "sysexits.h" (https://man.openbsd.org/sysexits):
 const EX_USAGE: u8 = 64;
 const EX_DATA_ERROR: u8 = 65;
 const EX_NO_INPUT: u8 = 66;
@@ -52,17 +52,25 @@ fn run_repl() -> ExitCode {
             break;
         }
 
-        let Ok(tokens) = tokenize(&line) else {
-            continue;
-        };
-        // TODO: Allow expressions and print their result
-        let Ok(stmts) = parse(tokens) else {
-            continue;
-        };
-        let Ok(_) = resolve(&stmts) else {
-            continue;
-        };
-        let _ = interpreter.eval(&stmts);
+        let Ok(tokens) = tokenize(&line) else { continue };
+        match parse(&tokens) {
+            Ok(stmts) => {
+                let Ok(_) = resolve(&stmts) else { continue };
+                let _ = interpreter.eval(&stmts);
+            },
+            // If statement parsing fails, try parsing input as an expression.
+            Err(errors) => {
+                let Ok(expr) = parse_expr(&tokens) else {
+                    // If parsing expression also fails, print original errors.
+                    eprintln!("{}", errors);
+                    continue;
+                };
+                let Ok(value) = interpreter.eval_expr(&expr) else {
+                    continue;
+                };
+                println!("{}", value.convert_to_string());
+            },
+        }
     }
 
     ExitCode::SUCCESS
@@ -80,8 +88,12 @@ fn run_file(path: &str) -> ExitCode {
     let Ok(tokens) = tokenize(&source) else {
         return ExitCode::from(EX_DATA_ERROR);
     };
-    let Ok(stmts) = parse(tokens) else {
-        return ExitCode::from(EX_DATA_ERROR);
+    let stmts = match parse(&tokens) {
+        Ok(stmts) => stmts,
+        Err(errors) => {
+            eprintln!("{}", errors);
+            return ExitCode::from(EX_DATA_ERROR);
+        },
     };
     let Ok(_) = resolve(&stmts) else {
         return ExitCode::from(EX_DATA_ERROR);

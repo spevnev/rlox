@@ -392,7 +392,7 @@ impl Interpreter {
         Ok(set_value)
     }
 
-    fn eval_expr(&mut self, LocExpr { loc, expr }: &LocExpr) -> Result<Value> {
+    pub fn eval_expr(&mut self, LocExpr { loc, expr }: &LocExpr) -> Result<Value> {
         match expr {
             Expr::Literal(value) => Ok(value.clone()),
             Expr::Grouping(expr) => self.eval_expr(expr),
