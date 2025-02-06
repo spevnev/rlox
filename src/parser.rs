@@ -672,10 +672,7 @@ impl<'a> Parser<'a> {
             Expr::GetProp(get) => Ok(LocExpr::new_set(get, r_expr)),
             _ => {
                 self.error(l_expr.loc, "Invalid assignment target");
-                Ok(LocExpr {
-                    loc: Loc::none(),
-                    expr: Expr::Literal(Value::Nil),
-                })
+                Ok(LocExpr::new_literal(Loc::none(), Value::Nil))
             },
         }
     }

@@ -18,7 +18,7 @@ const NATIVE_FUNCTIONS: [(&'static str, usize, NativeFun); 1] = [
     ("clock", 0, clock),
 ];
 
-pub fn create_native_fun_hashmap() -> AHashMap<String, Value> {
+pub fn create_hashmap_of_native_funs() -> AHashMap<String, Value> {
     AHashMap::from(NATIVE_FUNCTIONS.map(|(name, arity, fun)| {
         (
             name.to_owned(),

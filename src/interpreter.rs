@@ -5,7 +5,7 @@ use ahash::AHashMap;
 use crate::{
     error::{error, Loc},
     lexer::TokenKind,
-    native::create_native_fun_hashmap,
+    native::create_hashmap_of_native_funs,
     parser::{
         Binary, Call, ClassDecl, Expr, For, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Super, Superclass,
         Unary, Var, VarScope, While,
@@ -56,7 +56,7 @@ impl Scope {
     fn new_global() -> Rc<Self> {
         Rc::new(Self {
             parent: None,
-            symbols: RefCell::new(create_native_fun_hashmap()),
+            symbols: RefCell::new(create_hashmap_of_native_funs()),
         })
     }
 
@@ -315,7 +315,7 @@ impl Interpreter {
             return Err(Error::WrongArity);
         }
 
-        let mut args = Vec::new();
+        let mut args = Vec::with_capacity(call.args.len() + 1);
         for arg in &call.args {
             args.push(self.eval_expr(arg)?);
         }
