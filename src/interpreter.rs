@@ -1,22 +1,23 @@
-use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
+use std::{cell::RefCell, mem, rc::Rc};
 
 use ahash::AHashMap;
 
 use crate::{
     error::{error, Loc},
     lexer::TokenKind,
-    native::create_hashmap_of_native_funs,
+    native::{create_hashmap_of_native_funs, LocArg},
     parser::{
-        Binary, Call, ClassDecl, Expr, For, FunDecl, GetProp, If, LocExpr, Return, SetProp, Stmt, Super, Superclass,
-        Unary, Var, VarScope, While,
+        Binary, Call, ClassDecl, Expr, For, FunDecl, GetElement, GetProp, If, LocExpr, Return, SetElement, SetProp,
+        Stmt, Super, Superclass, Unary, Var, VarScope, While,
     },
-    value::{Callable, Class, Function, Instance, LoxFun, Value},
+    value::{Callable, Class, Function, Instance, LoxArray, LoxFun, Value},
 };
 
 pub enum Error {
     WrongType,
     UndefinedSymbol,
     WrongArity,
+    IndexOutOfBounds,
 
     // The following aren't actual errors, and are used to quickly return from a deeply nested call:
     Return(Value),
@@ -24,21 +25,7 @@ pub enum Error {
     Continue,
 }
 
-/// Debug trait is required in order to panic.
-impl Debug for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::WrongType => write!(f, "WrongType"),
-            Self::UndefinedSymbol => write!(f, "UndefinedSymbol"),
-            Self::WrongArity => write!(f, "WrongArity"),
-            Self::Return(_) => panic!("Panic on 'return' must be impossible."),
-            Self::Break => panic!("Panic on 'break' must be impossible."),
-            Self::Continue => panic!("Panic on 'continue' must be impossible."),
-        }
-    }
-}
-
-type Result<V, E = Error> = std::result::Result<V, E>;
+pub type Result<V, E = Error> = std::result::Result<V, E>;
 
 pub struct Scope {
     parent: Option<Rc<Scope>>,
@@ -152,12 +139,34 @@ impl Value {
                     Err(Error::WrongType)
                 }
             },
+            Value::Array(vec) => Ok(Rc::new(Instance {
+                class: Rc::new(Class {
+                    name: "Array".to_owned(),
+                    methods: AHashMap::new(),
+                    static_instance: None,
+                    superclass: None,
+                }),
+                fields: RefCell::new(AHashMap::from([(
+                    "length".to_owned(),
+                    Value::Number(vec.borrow().len() as f64),
+                )])),
+            })),
             _ => {
                 error!(
                     loc,
                     "Properties/methods only exist on instances but found '{}'",
                     self.error_to_string()
                 );
+                Err(Error::WrongType)
+            },
+        }
+    }
+
+    fn get_array(self, loc: Loc) -> Result<Rc<RefCell<LoxArray>>> {
+        match self {
+            Value::Array(array) => Ok(array),
+            _ => {
+                error!(loc, "Expected an array but found '{}'", self.error_to_string());
                 Err(Error::WrongType)
             },
         }
@@ -315,14 +324,24 @@ impl Interpreter {
             return Err(Error::WrongArity);
         }
 
-        let mut args = Vec::with_capacity(call.args.len() + 1);
-        for arg in &call.args {
-            args.push(self.eval_expr(arg)?);
-        }
-
         match &callable.fun {
-            Function::Native(fun) => Ok(fun(args)),
-            Function::Lox(fun) => self.eval_lox_fun(fun, args),
+            Function::Native(fun) => {
+                let mut args = Vec::with_capacity(call.args.len() + 1);
+                for arg in &call.args {
+                    args.push(LocArg {
+                        loc: arg.loc,
+                        value: self.eval_expr(arg)?,
+                    });
+                }
+                fun(args)
+            },
+            Function::Lox(fun) => {
+                let mut args = Vec::with_capacity(call.args.len() + 1);
+                for arg in &call.args {
+                    args.push(self.eval_expr(arg)?);
+                }
+                self.eval_lox_fun(fun, args)
+            },
         }
     }
 
@@ -394,6 +413,55 @@ impl Interpreter {
         Ok(set_value)
     }
 
+    fn get_index(&mut self, expr: &LocExpr) -> Result<usize> {
+        let value = self.eval_expr(&expr)?;
+        let Value::Number(index) = value else {
+            error!(
+                expr.loc,
+                "Expected index to be a number but found '{}'",
+                value.error_to_string(),
+            );
+            return Err(Error::WrongType);
+        };
+
+        if index < 0.0 || index.fract() != 0.0 {
+            error!(
+                expr.loc,
+                "Expected index to be a non-negative integer but found '{}'",
+                value.error_to_string(),
+            );
+            return Err(Error::WrongType);
+        }
+
+        Ok(index as usize)
+    }
+
+    fn eval_get_elem(&mut self, get: &GetElement) -> Result<Value> {
+        let array = self.eval_expr(&get.array)?.get_array(get.array.loc)?;
+
+        let index = self.get_index(&get.index)?;
+        if index < array.borrow().len() {
+            Ok(array.borrow()[index].clone())
+        } else {
+            error(get.index.loc, "Index out of bounds");
+            Err(Error::IndexOutOfBounds)
+        }
+    }
+
+    fn eval_set_elem(&mut self, set: &SetElement) -> Result<Value> {
+        let value = self.eval_expr(&set.expr)?;
+        let array = self.eval_expr(&set.array)?.get_array(set.array.loc)?;
+
+        let index = self.get_index(&set.index)?;
+        if index < array.borrow().len() {
+            array.borrow_mut()[index] = value.clone();
+            Ok(value)
+        } else {
+            error(set.index.loc, "Index out of bounds");
+            Err(Error::IndexOutOfBounds)
+        }
+    }
+
     pub fn eval_expr(&mut self, LocExpr { loc, expr }: &LocExpr) -> Result<Value> {
         match expr {
             Expr::Literal(value) => Ok(value.clone()),
@@ -456,6 +524,8 @@ impl Interpreter {
                     closure: self.scope.clone(),
                 }),
             }))),
+            Expr::GetElement(get) => self.eval_get_elem(get),
+            Expr::SetElement(set) => self.eval_set_elem(set),
         }
     }
 
@@ -648,6 +718,8 @@ impl Interpreter {
     pub fn eval(&mut self, stmts: &Vec<Stmt>) -> Result<()> {
         match self.eval_stmts(stmts) {
             Err(Error::Return(_)) => panic!("Return outside of function."),
+            Err(Error::Break) => panic!("Break outside of loop."),
+            Err(Error::Continue) => panic!("Continue outside of loop."),
             Err(err) => return Err(err),
             Ok(_) => Ok(()),
         }

@@ -57,6 +57,17 @@ pub struct Call {
     pub args: Vec<LocExpr>,
 }
 
+pub struct GetElement {
+    pub array: Box<LocExpr>,
+    pub index: Box<LocExpr>,
+}
+
+pub struct SetElement {
+    pub array: Box<LocExpr>,
+    pub index: Box<LocExpr>,
+    pub expr: Box<LocExpr>,
+}
+
 pub struct GetProp {
     pub instance: Box<LocExpr>,
     pub property: String,
@@ -93,6 +104,8 @@ pub enum Expr {
     This(Var),
     Super(Super),
     Lambda(Lambda),
+    GetElement(GetElement),
+    SetElement(SetElement),
 }
 
 pub struct LocExpr {
@@ -227,6 +240,27 @@ impl LocExpr {
         Self {
             loc,
             expr: Expr::Lambda(Lambda { params, body }),
+        }
+    }
+
+    fn new_get_elem(array: Self, index: Self) -> Self {
+        Self {
+            loc: array.loc,
+            expr: Expr::GetElement(GetElement {
+                array: Box::new(array),
+                index: Box::new(index),
+            }),
+        }
+    }
+
+    fn new_set_elem(get: GetElement, expr: Self) -> Self {
+        Self {
+            loc: get.array.loc,
+            expr: Expr::SetElement(SetElement {
+                array: get.array,
+                index: get.index,
+                expr: Box::new(expr),
+            }),
         }
     }
 }
@@ -542,6 +576,12 @@ impl<'a> Parser<'a> {
                     let args = self.parse_args()?;
                     expr = LocExpr::new_call(expr, args);
                 },
+                TokenKind::LeftBracket => {
+                    let index = self.parse_expr()?;
+                    self.consume(TokenKind::RightBracket)
+                        .ok_or_else(|| self.error(self.loc_after_prev(), "Unclosed '[', expected ']'"))?;
+                    expr = LocExpr::new_get_elem(expr, index);
+                },
                 TokenKind::Dot => {
                     let property = self
                         .consume(TokenKind::Identifier)
@@ -670,6 +710,7 @@ impl<'a> Parser<'a> {
         match l_expr.expr {
             Expr::Variable(var) => Ok(LocExpr::new_assign(l_expr.loc, var.name, r_expr)),
             Expr::GetProp(get) => Ok(LocExpr::new_set(get, r_expr)),
+            Expr::GetElement(get) => Ok(LocExpr::new_set_elem(get, r_expr)),
             _ => {
                 self.error(l_expr.loc, "Invalid assignment target");
                 Ok(LocExpr::new_literal(Loc::none(), Value::Nil))

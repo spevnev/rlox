@@ -4,10 +4,9 @@ use ahash::AHashMap;
 
 use crate::{
     interpreter::Scope,
+    native::NativeFun,
     parser::{FunParam, Stmt},
 };
-
-pub type NativeFun = fn(args: Vec<Value>) -> Value;
 
 pub struct LoxFun {
     pub is_initializer: bool,
@@ -56,6 +55,8 @@ pub struct Instance {
     pub fields: RefCell<AHashMap<String, Value>>,
 }
 
+pub type LoxArray = Vec<Value>;
+
 #[derive(Clone)]
 pub enum Value {
     Nil,
@@ -66,6 +67,7 @@ pub enum Value {
     Callable(Rc<Callable>),
     Class(Rc<Class>),
     Instance(Rc<Instance>),
+    Array(Rc<RefCell<LoxArray>>),
 }
 
 impl Value {
@@ -82,6 +84,15 @@ impl Value {
             },
             Value::Class(class) => class.name.clone(),
             Value::Instance(instance) => format!("{} instance", instance.class.name),
+            Value::Array(values) => format!(
+                "[{}]",
+                values
+                    .borrow()
+                    .iter()
+                    .map(|value| value.convert_to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         }
     }
 

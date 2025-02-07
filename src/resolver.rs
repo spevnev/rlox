@@ -3,8 +3,8 @@ use ahash::AHashMap;
 use crate::{
     error::{error, warning, Loc},
     parser::{
-        Assign, Binary, Call, ClassDecl, Expr, For, FunDecl, If, LocExpr, Return, Stmt, Super, Superclass, Var,
-        VarDecl, VarScope, While,
+        Assign, Binary, Call, ClassDecl, Expr, For, FunDecl, GetElement, If, LocExpr, Return, SetElement, Stmt, Super,
+        Superclass, Var, VarDecl, VarScope, While,
     },
     value::Class,
 };
@@ -212,6 +212,15 @@ impl Resolver {
                 self.current_fun = prev_fun;
 
                 self.end_scope();
+            },
+            Expr::GetElement(GetElement { array, index }) => {
+                self.resolve_expr(array);
+                self.resolve_expr(index);
+            },
+            Expr::SetElement(SetElement { array, index, expr }) => {
+                self.resolve_expr(expr);
+                self.resolve_expr(array);
+                self.resolve_expr(index);
             },
         }
     }
