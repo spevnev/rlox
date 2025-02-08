@@ -222,6 +222,11 @@ impl Resolver {
                 self.resolve_expr(array);
                 self.resolve_expr(index);
             },
+            Expr::ArrayLiteral(exprs) => {
+                for expr in exprs {
+                    self.resolve_expr(expr);
+                }
+            },
         }
     }
 

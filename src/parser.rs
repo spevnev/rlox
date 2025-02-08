@@ -106,6 +106,7 @@ pub enum Expr {
     Lambda(Lambda),
     GetElement(GetElement),
     SetElement(SetElement),
+    ArrayLiteral(Vec<LocExpr>),
 }
 
 pub struct LocExpr {
@@ -261,6 +262,13 @@ impl LocExpr {
                 index: get.index,
                 expr: Box::new(expr),
             }),
+        }
+    }
+
+    fn new_array_literal(loc: Loc, exprs: Vec<Self>) -> Self {
+        Self {
+            loc,
+            expr: Expr::ArrayLiteral(exprs),
         }
     }
 }
@@ -532,6 +540,20 @@ impl<'a> Parser<'a> {
                 let body = Rc::new(self.parse_block()?);
 
                 Ok(LocExpr::new_lambda(token.loc, params, body))
+            },
+            TokenKind::LeftBracket => {
+                let mut exprs = Vec::new();
+
+                if !self.is_next(TokenKind::RightBracket) {
+                    exprs.push(self.parse_expr()?);
+                    while self.try_consume(TokenKind::Comma) {
+                        exprs.push(self.parse_expr()?);
+                    }
+                }
+                self.consume(TokenKind::RightBracket)
+                    .ok_or_else(|| self.error(self.loc_after_prev(), "Unclosed '[', expected ']'"))?;
+
+                Ok(LocExpr::new_array_literal(token.loc, exprs))
             },
             _ => {
                 self.error(

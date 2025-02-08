@@ -526,6 +526,13 @@ impl Interpreter {
             }))),
             Expr::GetElement(get) => self.eval_get_elem(get),
             Expr::SetElement(set) => self.eval_set_elem(set),
+            Expr::ArrayLiteral(exprs) => {
+                let mut arr = Vec::with_capacity(exprs.len());
+                for expr in exprs {
+                    arr.push(self.eval_expr(expr)?);
+                }
+                Ok(Value::Array(Rc::new(RefCell::new(arr))))
+            },
         }
     }
 
