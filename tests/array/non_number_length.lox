@@ -1,0 +1,1 @@
+Array("not a number", nil); // [ERROR] Expected length to be a non-negative integer but found '"not a number"' at 1:7.

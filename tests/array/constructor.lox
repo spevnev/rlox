@@ -1,0 +1,1 @@
+Array(); // [ERROR] Expected 2 arguments but got 0 at 1:1.
