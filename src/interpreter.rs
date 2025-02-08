@@ -343,7 +343,7 @@ impl Interpreter {
 
         match &callable.fun {
             Function::Native(fun) => {
-                let mut args = Vec::with_capacity(call.args.len() + 1);
+                let mut args = Vec::with_capacity(call.args.len());
                 for arg in &call.args {
                     args.push(LocArg {
                         loc: arg.loc,
@@ -353,7 +353,7 @@ impl Interpreter {
                 fun(args)
             },
             Function::Lox(fun) => {
-                let mut args = Vec::with_capacity(call.args.len() + 1);
+                let mut args = Vec::with_capacity(call.args.len());
                 for arg in &call.args {
                     args.push(self.eval_expr(arg)?);
                 }
@@ -718,11 +718,8 @@ impl Interpreter {
 
     pub fn eval(&mut self, stmts: &Vec<Stmt>) -> Result<()> {
         match self.eval_stmts(stmts) {
-            Err(Error::Return(_)) => panic!("Return outside of function."),
-            Err(Error::Break) => panic!("Break outside of loop."),
-            Err(Error::Continue) => panic!("Continue outside of loop."),
-            Err(err) => return Err(err),
             Ok(_) => Ok(()),
+            Err(err) => Err(err),
         }
     }
 }
