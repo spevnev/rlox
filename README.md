@@ -42,6 +42,18 @@ Tree-walk Lox interpreter from [Crafting Interpreters](https://craftinginterpret
     }
     ```
 
+- arrays
+    ```js
+    var arr = Array(3, 0);
+    arr[1] = 5;
+    print arr; // [0, 5, 0]
+
+    // or
+
+    var lit = [1, [2, 3], [], [4]];
+    print lit[1][1]; // 3
+    ```
+
 ## Tests
 
 `tests/` contains a modified `jlox` test suite from [the official Lox implementation](https://github.com/munificent/craftinginterpreters).
