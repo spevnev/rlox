@@ -1,0 +1,12 @@
+var arr = Array(3, Array(2, 0));
+
+/// This just aliases so modifying `alias` will also change `arr` (since they are the same array)
+var alias = arr;
+alias[1][1] = 5;
+print arr; // [[0, 0], [0, 5], [0, 0]]
+
+/// This performs a deep copy so
+var copy = copy_array(arr);
+copy[1][0] = 10;
+print arr; // [[0, 0], [0, 5], [0, 0]]
+print copy; // [[0, 0], [10, 5], [0, 0]]

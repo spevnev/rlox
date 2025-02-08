@@ -17,8 +17,8 @@ pub struct LoxFun {
 }
 
 pub enum Function {
-    Native(NativeFun),
     Lox(LoxFun),
+    Native(NativeFun),
 }
 
 pub struct Callable {
