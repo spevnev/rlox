@@ -1,0 +1,9 @@
+var arr = Array(4, Array(3, Array(2, 0)));
+for (var i = 0;i < arr.length;i = i + 1) {
+    for (var j = 0;j < arr[0].length;j = j + 1) {
+        for (var k = 0;k < arr[0][0].length;k = k + 1) {
+            arr[i][j][k] = i + j + k;
+        }
+    }
+}
+print arr; // [[[0, 1], [1, 2], [2, 3]], [[1, 2], [2, 3], [3, 4]], [[2, 3], [3, 4], [4, 5]], [[3, 4], [4, 5], [5, 6]]]

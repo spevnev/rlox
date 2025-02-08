@@ -7,8 +7,8 @@ use std::{
 use ahash::AHashMap;
 
 use crate::{
-    error::{error, Loc},
-    interpreter::{Error, Result},
+    error::Loc,
+    interpreter::Result,
     value::{Callable, Function, Value},
 };
 
@@ -25,28 +25,28 @@ fn clock(args: Vec<LocArg>) -> Result<Value> {
     Ok(Value::Number(secs))
 }
 
+fn copy_array(value: &Value) -> Value {
+    match value {
+        Value::Array(array) => {
+            let mut copy = Vec::with_capacity(array.borrow().len());
+            for elem in array.borrow().iter() {
+                copy.push(copy_array(elem));
+            }
+            Value::Array(Rc::new(RefCell::new(copy)))
+        },
+        _ => value.clone(),
+    }
+}
+
 fn new_array(args: Vec<LocArg>) -> Result<Value> {
     assert!(args.len() == 2);
 
-    let Value::Number(len) = args[0].value else {
-        error!(
-            args[0].loc,
-            "Expected length to be a non-negative integer but found '{}'",
-            args[0].value.error_to_string(),
-        );
-        return Err(Error::WrongType);
-    };
-    if len < 0.0 || len.fract() != 0.0 {
-        error!(
-            args[0].loc,
-            "Expected length to be a non-negative integer but found '{}'",
-            args[0].value.error_to_string(),
-        );
-        return Err(Error::WrongType);
+    let len = args[0].value.get_index(args[0].loc, false)?;
+    let mut arr = Vec::with_capacity(len);
+    for _ in 0..len {
+        arr.push(copy_array(&args[1].value));
     }
-
-    let value = args[1].value.clone();
-    Ok(Value::Array(Rc::new(RefCell::new(vec![value; len as usize]))))
+    Ok(Value::Array(Rc::new(RefCell::new(arr))))
 }
 
 const NATIVE_FUNCTIONS: [(&'static str, usize, NativeFun); 2] = [

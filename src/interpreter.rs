@@ -171,6 +171,23 @@ impl Value {
             },
         }
     }
+
+    /// Converts value (if it is `Value::Number`) to `usize` for length/index.
+    pub fn get_index(&self, loc: Loc, is_index: bool) -> Result<usize> {
+        if let Value::Number(len) = *self {
+            if len >= 0.0 && len.fract() == 0.0 {
+                return Ok(len as usize);
+            }
+        }
+
+        error!(
+            loc,
+            "Expected {} to be a non-negative integer but found '{}'",
+            if is_index { "index" } else { "length" },
+            self.error_to_string(),
+        );
+        Err(Error::WrongType)
+    }
 }
 
 pub struct Interpreter {
@@ -413,33 +430,10 @@ impl Interpreter {
         Ok(set_value)
     }
 
-    fn get_index(&mut self, expr: &LocExpr) -> Result<usize> {
-        let value = self.eval_expr(&expr)?;
-        let Value::Number(index) = value else {
-            error!(
-                expr.loc,
-                "Expected index to be a number but found '{}'",
-                value.error_to_string(),
-            );
-            return Err(Error::WrongType);
-        };
-
-        if index < 0.0 || index.fract() != 0.0 {
-            error!(
-                expr.loc,
-                "Expected index to be a non-negative integer but found '{}'",
-                value.error_to_string(),
-            );
-            return Err(Error::WrongType);
-        }
-
-        Ok(index as usize)
-    }
-
     fn eval_get_elem(&mut self, get: &GetElement) -> Result<Value> {
         let array = self.eval_expr(&get.array)?.get_array(get.array.loc)?;
 
-        let index = self.get_index(&get.index)?;
+        let index = self.eval_expr(&get.index)?.get_index(get.index.loc, true)?;
         if index < array.borrow().len() {
             Ok(array.borrow()[index].clone())
         } else {
@@ -452,7 +446,7 @@ impl Interpreter {
         let value = self.eval_expr(&set.expr)?;
         let array = self.eval_expr(&set.array)?.get_array(set.array.loc)?;
 
-        let index = self.get_index(&set.index)?;
+        let index = self.eval_expr(&set.index)?.get_index(set.index.loc, true)?;
         if index < array.borrow().len() {
             array.borrow_mut()[index] = value.clone();
             Ok(value)
