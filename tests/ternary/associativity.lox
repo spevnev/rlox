@@ -1,1 +1,4 @@
-print false ? "true" : true ? "false-true" : "false-false"; // false-true
+/// Check right-associativity:
+/// Right: true ? "right" : (true ? "left" : "unreachable") -> right
+/// Left: (true ? "right" : true) ? "left" : "unreachable" -> left
+print true ? "right" : true ? "left" : "unreachable"; // right
