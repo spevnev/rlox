@@ -8,7 +8,7 @@ Tree-walk Lox interpreter from [Crafting Interpreters](https://craftinginterpret
 
 - conditional operator (`?:`)
     ```python
-    print condition ? 'true' : 'false';
+    print condition ? "true" : "false";
     ```
 
 - anonymous functions
